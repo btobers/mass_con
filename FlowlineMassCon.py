@@ -3,7 +3,7 @@ import pandas as pd
 import rasterio as rio
 import matplotlib.path as path
 import geopandas as gpd
-import sys
+import sys, os
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 """
@@ -77,7 +77,7 @@ def get_smb(elev, mb, ela):
     # output smb should be negative below ela, positive above
     smb = (elev - ela) * mb
 
-    return smb
+    return smb      # mm w.e.
 
 
 # get thickness input between each set of flowlines
@@ -141,8 +141,13 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     """
     # step along flowlines and get vx vy for each centroid
     area_flux = np.full_like(dx, np.nan)
-    h_centroid = np.full_like(dx, np.nan)
+    h = np.full_like(dx, np.nan)
     flux_in = np.full_like(h_in, np.nan)
+
+    # convert smb from mm w.e. to m ice
+    smb = smb / 1000
+    # convert to meters ice equiv.
+    smb = smb * 1000 / 917
 
     # iterate through each flowline, get vx and vy arrays
     for _i in range(dx.shape[1]):
@@ -153,30 +158,28 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
 
         # iterate over all centroids and get thickness
         for _j in range(start_pos[_i] + 1, dx.shape[0]):
-            lastf = h_centroid[_j-1,_i] * area_flux[_j-1, _i]
+            lastf = h[_j-1,_i] * area_flux[_j-1, _i]
             if _j == start_pos[_i] + 1:
                 lastf = flux_in[_i]
 
-            thisf = lastf - smb[_j,_i] - dhdt
-
-            h_centroid[_j, _i] = thisf / area_flux[_j, _i]
+            h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt
 
     print("total input ice flux = {:.3f} cubic km. per year".format(np.nansum(flux_in)*1e-9))
-    return h_centroid
+    return h
 
 
 def main():
     ##############################################################################################
     ##### user inputs - note all input files should be projected to same coordinate system   #####
     ##############################################################################################
-    # mass balance gradient (mm/m/yr)
+    # mass balance gradient (mm w.e./m)
     mb = 4
     # equilibrium line altitude (ELA; (m))
     ela = 1550
     # surface elevation change rate (m/yr)
     dhdt = -.5
     # data file path
-    dat_path = '../data/'
+    dat_path = '../massCon/ruth/data/'
     # x and y vertex coordinate arrays output by GenFlowlines.m
     verts_x = 'verts_x.csv'
     verts_y = 'verts_y.csv'
@@ -184,15 +187,15 @@ def main():
     vx_ds = 'ALA_G0120_0000_vx_clip.tif'
     vy_ds = 'ALA_G0120_0000_vy_clip.tif'
     # digital elevation model
-    dem_ds = 'ifsar_ruth_3413.tif'
+    dem_ds = 'ifsar_ruth.tif'
     # thickness measurements
     rdata = 'amp_picks.gpkg'
     # output file name
-    oname = 'pcloud.csv'
+    oname = 'tmp.csv'
     # plot results
     plot = True
     ##############################################################################################
- 
+
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
@@ -215,7 +218,6 @@ def main():
     check_rasters(vx_ds, vy_ds)
 
     dem_ds = rio.open(dat_path + dem_ds, "r")
-
 
     # read in thickness measurements - this is currently set up to read a geopackage, but could easily by swapped for a csv file using:
     # rdata = pd.read_csv('file.csv'), so long as the csv has x, y, h columns
@@ -240,7 +242,6 @@ def main():
     vy = sample_2d_raster(cxcy, vy_ds)
     elev = sample_2d_raster(cxcy, dem_ds)
 
-
     # get surface mass balance
     smb = get_smb(elev, mb, ela)
 
@@ -248,7 +249,7 @@ def main():
     h = conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos)
 
     if plot:
-        fig, axs = plt.subplots(1,3,sharey=True, figsize=(15,4))
+        fig, axs = plt.subplots(1,3,sharey=True, figsize=(15,5))
 
         ax = axs[0]
         ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
@@ -258,19 +259,22 @@ def main():
         ax.set_ylabel('y-distance (m)')
 
         ax = axs[1]
+        v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
         ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax.scatter(cx,cy,c=smb,vmin=-1000,vmax=1000,cmap='RdBu')
-        fig.colorbar(c,ax=ax,label='annual mass balance (mm)')
+        c = ax.scatter(cx,cy,c=1e-3*smb,vmin=-1e-3*v,vmax=1e-3*v,cmap='RdBu')
+        fig.colorbar(c,ax=ax,label='annual mass balance (m w.e.)')
         ax.set_xlabel('x-distance (m)')
 
         ax = axs[2]
         ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
         c = ax.scatter(cx,cy,c=h,cmap='viridis_r',vmin=200,vmax=1000)
-        c = ax.scatter(rdata.x, rdata.y, c=rdata.h, cmap='viridis_r', vmin=200,vmax=1000)
+        c = ax.scatter(rdata.x, rdata.y, c=rdata.h, cmap='viridis_r', vmin=0,vmax=1000,zorder=100)
         fig.colorbar(c, ax=ax,label='ice thickness (m)')
         ax.set_xlabel('x-distance (m)')
 
+        fig.suptitle(f"mass balance gradient = {mb} mm w.e./m/yr\nela = {ela} m\ndh/dt = {dhdt} m/yr")
         plt.show()
+        fig.savefig(dat_path + f'out/mb_{mb}_ela_{ela}_dhdt_{dhdt}.png', dpi=300)
 
 
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
@@ -279,10 +283,9 @@ def main():
     # export output xyz points
     cx = np.ravel(cx, order="F")
     cy = np.ravel(cy, order="F")
-    h_centroids = np.ravel(h_centroids, order="F")
-    # # v_normal = np.ravel(area_flux, order="f")
+    h = np.ravel(h, order="F")
 
-    out = np.column_stack((cx,cy,h_centroids))
+    out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=["x","y","h"])
     out_df.to_csv(dat_path + 'out/' + oname)
     print(f"point cloud exported to:\t{dat_path + 'out/' + oname}")

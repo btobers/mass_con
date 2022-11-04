@@ -6,7 +6,7 @@ Brandon S. Tober
 
 clc; clear all; close all;
 % load x velocity 
-dat_path            = '..\data\';
+dat_path            = '..\massCon\ruth\data\';
 [vx,R]              = readgeoraster(strcat(dat_path, 'ALA_G0120_0000_vx_clip.tif'));
 % [vx,R]              = readgeoraster(strcat(dat_path, 'Millan_vx_clip.tif'));
 vx                  = double(vx);
@@ -104,6 +104,7 @@ plot(xcoords,ycoords,'.')
 streamline(verts)
 %% get vertices for each flowline and export vx vy arrays
 nverts              = 75;
+nverts              = 300;
 % [s,d]               = cellfun(@size,verts);
 % nverts              = min(s);
 
