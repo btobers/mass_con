@@ -116,7 +116,7 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
 
 
 # for each flowline pair, centroid coordinate pair closest to the average thickness measurment location for that flowband - this will be the location where we define the known thickness
-def get_starts(cx, cy, dx, dy, coords_in):
+def get_starts(cx, cy, coords_in):
     start_pos = np.zeros(cx.shape[1])
     for _i in range(cx.shape[1]):
         dist = ((cx[:,_i] - coords_in[_i,0])**2 + (cy[:,_i] - coords_in[_i,1])**2)**0.5
@@ -238,7 +238,7 @@ def main():
     h_in, coords_in = get_thickness_input(verts_x, verts_y, rdata)
 
     # trim all centroid points upglacer from thickness measurments
-    start_pos = get_starts(cx, cy, dx, dy, coords_in)
+    start_pos = get_starts(cx, cy, coords_in)
 
     # sample vx, vy, and elev
     vx = sample_2d_raster(cxcy, vx_ds)
