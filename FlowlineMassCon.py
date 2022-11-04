@@ -115,21 +115,12 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
     return h_in, coords_in
 
 
-# for each flowline pair, find the index of the first upglacier centroid for which we'll define the input flux
+# for each flowline pair, centroid coordinate pair closest to the average thickness measurment location for that flowband - this will be the location where we define the known thickness
 def get_starts(cx, cy, dx, dy, coords_in):
-    ### ATTENTION ###
-    # we'll use prior knowledge that our glacier flows in a negative x-direction from our thickness measuremnts. 
-    # so we'll of the index correspoinding to the first downglacier centroid from the averaged location of our upglacier thickness meaurements.
     start_pos = np.zeros(cx.shape[1])
     for _i in range(cx.shape[1]):
-        ### change the following line based on glacier application ###
-        ### for a glacier flowing in the positive y-direction, the following line should be: ###
-        # idx_arr = np.where(cy[:, _i] >= coords_in[_i, 1])[0] ###
-        idx_arr = np.where(cx[:, _i] <= coords_in[_i, 0])[0]
-        if len(idx_arr) == 0:
-            continue
-        else:
-            start_pos[_i] = idx_arr[0]
+        dist = ((cx[:,_i] - coords_in[_i,0])**2 + (cy[:,_i] - coords_in[_i,1])**2)**0.5
+        start_pos[_i] = np.argmin(dist)
 
     return start_pos.astype(int)
 
@@ -182,12 +173,12 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
 
 def main():
     ##############################################################################################
-    ##### user inputs - note all input files should be projected to same coordinate system   #####
+    ##### user inputs - note, all input files should be projected to same coordinate system  #####
     ##############################################################################################
     # mass balance gradient (mm w.e./m)
     mb = 4
     # equilibrium line altitude (m)
-    ela = 1550
+    ela = 1300
     # surface elevation change rate (m/yr)
     dhdt = -.5
     # data file path
