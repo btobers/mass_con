@@ -22,6 +22,9 @@ vx_ds: x-component surface velocity geotiff file (same projection as cx & cy)
 vy_ds: y-component surface velocity geotiff file (same projection as cx & cy)
 dem_ds: digital elevation model geotiff file (same projection as cx & cy)
 h_in: geopackage/csv with thickness measurements
+mb: mass balance gradient (mm w.e./m)
+ela: equilibrium line altitude (m)
+dhdt: surface elevation change rate (m/yr)
 
 outputs:
 pcloud: file of size (#Steps x #Flowlines - 1, 3) containing x-coordinates, y-coordinates, thicknesses
@@ -33,6 +36,7 @@ def check_rasters(r1, r2):
         exit(1)
     if r1.shape != r2.shape:
         exit(1)
+
     return
 
 
@@ -89,23 +93,24 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
     # instantiate thickness input array that will hold average of all thickness measurements between each set of flowlines
     h_in = np.repeat(np.nan, c - 1)
     # instantiate average input coordinate for each flowline pair
-    coords_in = np.zeros((c -1, 2))
+    coords_in = np.full((c -1, 2), np.nan)
 
     # do the magic
     for _i in range(c - 1):
-        # take first set of along flowline verts, then concatenate flipped second set to make a closed polygon from
-        tmpx = np.concatenate((verts_x[:,_i], np.flipud(verts_x[:,_i+1])))
-        tmpy = np.concatenate((verts_y[:,_i], np.flipud(verts_y[:,_i+1])))
-        # horizontally stack x and y coords
-        coords = np.column_stack((tmpx, tmpy))
-        poly = path.Path(coords)
-        # get thickness points that fill within this poly
-        idxs = poly.contains_points(thick_coords)
-        # get averaged thickness
-        h_in[_i] = np.nanmean(thick_gdf["h"].iloc[idxs])
-        # save average coord
-        coords_in[_i, 0] = np.nanmean(thick_gdf["x"].iloc[idxs])
-        coords_in[_i, 1] = np.nanmean(thick_gdf["y"].iloc[idxs])
+            # take first set of along flowline verts, then concatenate flipped second set to make a closed polygon from
+            tmpx = np.concatenate((verts_x[:,_i], np.flipud(verts_x[:,_i+1])))
+            tmpy = np.concatenate((verts_y[:,_i], np.flipud(verts_y[:,_i+1])))
+            # horizontally stack x and y coords
+            coords = np.column_stack((tmpx, tmpy))
+            poly = path.Path(coords)
+            # get thickness points that fill within this poly
+            idxs = poly.contains_points(thick_coords)
+            if np.sum(idxs) > 0:
+                # get averaged thickness
+                h_in[_i] = np.nanmean(thick_gdf["h"].iloc[idxs])
+                # save average coord
+                coords_in[_i, 0] = np.nanmean(thick_gdf["x"].iloc[idxs])
+                coords_in[_i, 1] = np.nanmean(thick_gdf["y"].iloc[idxs])
 
     return h_in, coords_in
 
@@ -113,7 +118,7 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
 # for each flowline pair, find the index of the first upglacier centroid for which we'll define the input flux
 def get_starts(cx, cy, dx, dy, coords_in):
     ### ATTENTION ###
-    # for this case, we'll use prior knowledge that our glacier flows in a negative x-direction from our thickness measuremnts. 
+    # we'll use prior knowledge that our glacier flows in a negative x-direction from our thickness measuremnts. 
     # so we'll of the index correspoinding to the first downglacier centroid from the averaged location of our upglacier thickness meaurements.
     start_pos = np.zeros(cx.shape[1])
     for _i in range(cx.shape[1]):
@@ -125,6 +130,7 @@ def get_starts(cx, cy, dx, dy, coords_in):
             continue
         else:
             start_pos[_i] = idx_arr[0]
+
     return start_pos.astype(int)
 
 
@@ -142,7 +148,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     # step along flowlines and get vx vy for each centroid
     area_flux = np.full_like(dx, np.nan)
     h = np.full_like(dx, np.nan)
-    flux_in = np.full_like(h_in, np.nan)
+    flux_in = []
 
     # convert smb from mm w.e. to m ice
     smb = smb / 1000
@@ -153,18 +159,24 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     for _i in range(dx.shape[1]):
         # get area flux through each centroid, determined by (vy*dx-vx*dy)
         area_flux[:, _i] = np.abs((vx[:, _i] * dy[:, _i]) - (vy[:, _i] * dx[:, _i]))
+
         # determine input ice flux, as (h*(vy*dx-vx*dy)) - this is the quantity that will be conserved along each flowline
-        flux_in[_i] = h_in[_i] * area_flux[start_pos[_i], _i]
+        flux_in.append(h_in[_i] * area_flux[start_pos[_i], _i])
+        h[start_pos[_i], _i] = h_in[_i]
 
-        # iterate over all centroids and get thickness
-        for _j in range(start_pos[_i] + 1, dx.shape[0]):
-            lastf = h[_j-1,_i] * area_flux[_j-1, _i]
-            if _j == start_pos[_i] + 1:
-                lastf = flux_in[_i]
-
+        # iterate over all centroids and get thickness - we'll use two for loops, one for going upstream and one for going downstream. there's probably a more efficient way to do this
+        # go upstream first
+        for _j in range(start_pos[_i] - 1, -1, -1):
+            lastf = h[_j+1,_i] * area_flux[_j+1, _i]
             h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt
 
+        # now downstream
+        for _j in range(start_pos[_i] + 1, dx.shape[0]):
+            lastf = h[_j-1,_i] * area_flux[_j-1, _i]
+            h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt      
+
     print("total input ice flux = {:.3f} cubic km. per year".format(np.nansum(flux_in)*1e-9))
+
     return h
 
 
@@ -174,7 +186,7 @@ def main():
     ##############################################################################################
     # mass balance gradient (mm w.e./m)
     mb = 4
-    # equilibrium line altitude (ELA; (m))
+    # equilibrium line altitude (m)
     ela = 1550
     # surface elevation change rate (m/yr)
     dhdt = -.5
@@ -275,7 +287,6 @@ def main():
         fig.suptitle(f"mass balance gradient = {mb} mm w.e./m/yr\nela = {ela} m\ndh/dt = {dhdt} m/yr")
         plt.show()
         fig.savefig(dat_path + f'out/mb_{mb}_ela_{ela}_dhdt_{dhdt}.png', dpi=300)
-
 
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h_centroids[h_centroids > 940] = np.nan
