@@ -21,6 +21,6 @@ do
    echo "python $FlowlineMassCon.py config.ini -mb $mb -ela $ela -dhdt $dhdt -out_name "mb_${mb}_ela_${ela}_dhdt_${dhdt}.csv"" >> job.txt
 done
 
-parallel -j $ncore < ./job.txt
+# parallel -j $ncore < ./job.txt
 
-rm job.txt
+# rm job.txt
