@@ -3,10 +3,10 @@ import pandas as pd
 import rasterio as rio
 import matplotlib.path as path
 import geopandas as gpd
-import sys, os
+import sys, os, argparse, configparser
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-"""
+'''
 FlowlineMassConModel.py
 
 author: Brandon S. Tober
@@ -28,7 +28,7 @@ dhdt: surface elevation change rate (m/yr)
 
 outputs:
 pcloud: file of size (#Steps x #Flowlines - 1, 3) containing x-coordinates, y-coordinates, thicknesses
-"""
+'''
 
 # make sure vx and vy rasters are same size and extent
 def check_rasters(r1, r2):
@@ -88,7 +88,7 @@ def get_smb(elev, mb, ela):
 # from each set of neighboring flowlines, create a polygon and see which thickness measurements fall within, then get average
 def get_thickness_input(verts_x, verts_y, thick_gdf):
     # get thickness gdf x,y coords stacked together
-    thick_coords = thick_gdf[["x","y"]].to_numpy()
+    thick_coords = thick_gdf[['x','y']].to_numpy()
     r, c = verts_x.shape
     # instantiate thickness input array that will hold average of all thickness measurements between each set of flowlines
     h_in = np.repeat(np.nan, c - 1)
@@ -107,10 +107,10 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
             idxs = poly.contains_points(thick_coords)
             if np.sum(idxs) > 0:
                 # get averaged thickness
-                h_in[_i] = np.nanmean(thick_gdf["h"].iloc[idxs])
+                h_in[_i] = np.nanmean(thick_gdf['h'].iloc[idxs])
                 # save average coord
-                coords_in[_i, 0] = np.nanmean(thick_gdf["x"].iloc[idxs])
-                coords_in[_i, 1] = np.nanmean(thick_gdf["y"].iloc[idxs])
+                coords_in[_i, 0] = np.nanmean(thick_gdf['x'].iloc[idxs])
+                coords_in[_i, 1] = np.nanmean(thick_gdf['y'].iloc[idxs])
 
     return h_in, coords_in
 
@@ -126,7 +126,7 @@ def get_starts(cx, cy, coords_in):
 
 
 def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
-    """
+    '''
     we determine the ice thickness along flowlines by conservation of mass
 
     the ice flux through a segment (dx, dy) is (v_surface * h), where v_surface is the surface velocity normal to the flux gate segment and h is the ice thickness.
@@ -135,7 +135,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     therefore the ice flux through a segment (dx, dy) simplifies to (h*(vy*dx-vx*dy))
 
     here, we'll refer to (vy*dx-vx*dy) as our area flux
-    """
+    '''
     # step along flowlines and get vx vy for each centroid
     area_flux = np.full_like(dx, np.nan)
     h = np.full_like(dx, np.nan)
@@ -166,39 +166,59 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
             lastf = h[_j-1,_i] * area_flux[_j-1, _i]
             h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt      
 
-    print("total input ice flux = {:.3f} cubic km. per year".format(np.nansum(flux_in)*1e-9))
+    print('total input ice flux = {:.3f} cubic km. per year'.format(np.nansum(flux_in)*1e-9))
 
     return h
 
 
 def main():
-    ##############################################################################################
-    ##### user inputs - note, all input files should be projected to same coordinate system  #####
-    ##############################################################################################
-    # mass balance gradient (mm w.e./m)
-    mb = 4
-    # equilibrium line altitude (m)
-    ela = 1300
-    # surface elevation change rate (m/yr)
-    dhdt = -.5
-    # data file path
-    dat_path = '../massCon/ruth/data/'
-    # x and y vertex coordinate arrays output by GenFlowlines.m
-    verts_x = 'verts_x.csv'
-    verts_y = 'verts_y.csv'
-    # x and y component velocity rasters
-    vx_ds = 'ALA_G0120_0000_vx_clip.tif'
-    vy_ds = 'ALA_G0120_0000_vy_clip.tif'
-    # digital elevation model
-    dem_ds = 'ifsar_ruth.tif'
-    # thickness measurements
-    rdata = 'amp_picks.gpkg'
-    # output file name
-    oname = 'tmp.csv'
-    # plot results
-    plot = True
-    ##############################################################################################
+    # Set up CLI
+    parser = argparse.ArgumentParser(
+    description='''Program conserving mass and calculating ice thickness along glacier flowlines\nNot all arguments are set up for command line input. Edif input files in the configuration file''',
+    formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('conf', help='path to configuration file (.ini)', type=str)
+    parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=int, nargs='?')
+    parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=int, nargs='?')
+    parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=int, nargs='?')
+    parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?', default='pcloud.csv')
+    parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_false')
+    args = parser.parse_args()
 
+    # parse config file
+    config = configparser.ConfigParser()
+    try:
+        config.read(args.conf)
+    except Exception as err:
+        print("Unable to parse config file.")
+        print(err)
+        sys.exit(1)
+
+    dat_path = config['path']['dat_path']
+    verts_x = config['path']['verts_x']
+    verts_y = config['path']['verts_y']
+    vx_ds = config['path']['vx']
+    vy_ds = config['path']['vy']
+    dem_ds = config['path']['dem']
+    rdata = config['path']['rdata']
+    out_name = config['path']['out_name']
+    mb = float(config['param']['mb'])
+    ela = float(config['param']['ela'])
+    dhdt = float(config['param']['dhdt'])
+    plot = bool(config['param']['plot'])
+    
+    if args.mb:
+        mb = args.mb
+    if args.ela:
+        ela = args.ela
+    if args.dhdt:
+        dhdt = args.dhdt
+    if args.out_name:
+        out_name = args.out_name
+        # make sure endswith csv
+        if not out_name.endswith('.csv'):
+            out_name = out_name.split('.')[0] + '.csv'
+    if args.plot:
+        plot = args.plot
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
@@ -213,14 +233,14 @@ def main():
     cxcy = np.dstack((cx, cy))
 
     # x and y component surface velocities
-    vx_ds = rio.open(dat_path + vx_ds, "r")
-    # vx_ds = rio.open(dat_path + "Millan_vx_clip.tif", "r")    
-    vy_ds = rio.open(dat_path + vy_ds, "r")
-    # vy_ds = rio.open(dat_path + "Millan_vy_clip.tif", "r")
+    vx_ds = rio.open(dat_path + vx_ds, 'r')
+    # vx_ds = rio.open(dat_path + 'Millan_vx_clip.tif', 'r')    
+    vy_ds = rio.open(dat_path + vy_ds, 'r')
+    # vy_ds = rio.open(dat_path + 'Millan_vy_clip.tif', 'r')
     # check for raster size mismatch
     check_rasters(vx_ds, vy_ds)
 
-    dem_ds = rio.open(dat_path + dem_ds, "r")
+    dem_ds = rio.open(dat_path + dem_ds, 'r')
 
     # read in thickness measurements - this is currently set up to read a geopackage, but could easily by swapped for a csv file using:
     # rdata = pd.read_csv('file.csv'), so long as the csv has x, y, h columns
@@ -230,9 +250,9 @@ def main():
     # projet radar data to same coordinate sys as velocity data
     rdata = rdata.to_crs(epsg=3413)
     # rdata = rdata.to_crs(epsg=32607)
-    rdata["x"] = rdata.centroid.x
-    rdata["y"] = rdata.centroid.y
-    rdata = rdata.sort_values(["y"], ascending=True)
+    rdata['x'] = rdata.centroid.x
+    rdata['y'] = rdata.centroid.y
+    rdata = rdata.sort_values(['y'], ascending=True)
 
     # for each set of centroids, get average input thickness
     h_in, coords_in = get_thickness_input(verts_x, verts_y, rdata)
@@ -275,7 +295,7 @@ def main():
         fig.colorbar(c, ax=ax,label='ice thickness (m)')
         ax.set_xlabel('x-distance (m)')
 
-        fig.suptitle(f"mass balance gradient = {mb} mm w.e./m/yr\nela = {ela} m\ndh/dt = {dhdt} m/yr")
+        fig.suptitle(f'mass balance gradient = {mb} mm w.e./m/yr\nela = {ela} m\ndh/dt = {dhdt} m/yr')
         plt.show()
         fig.savefig(dat_path + f'out/mb_{mb}_ela_{ela}_dhdt_{dhdt}.png', dpi=300)
 
@@ -283,15 +303,15 @@ def main():
     # h_centroids[h_centroids > 940] = np.nan
 
     # export output xyz points
-    cx = np.ravel(cx, order="F")
-    cy = np.ravel(cy, order="F")
-    h = np.ravel(h, order="F")
+    cx = np.ravel(cx, order='F')
+    cy = np.ravel(cy, order='F')
+    h = np.ravel(h, order='F')
 
     out = np.column_stack((cx,cy,h))
-    out_df = pd.DataFrame(data=out, columns=["x","y","h"])
-    out_df.to_csv(dat_path + 'out/' + oname)
-    print(f"point cloud exported to:\t{dat_path + 'out/' + oname}")
+    out_df = pd.DataFrame(data=out, columns=['x','y','h'])
+    out_df.to_csv(dat_path + 'out/' + out_name)
+    print('point cloud exported to:\t' + str(dat_path) + 'out/' + str(out_name))
 
 # execute if run as a script
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
