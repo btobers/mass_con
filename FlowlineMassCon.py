@@ -166,8 +166,6 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
             lastf = h[_j-1,_i] * area_flux[_j-1, _i]
             h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt      
 
-    print('total input ice flux = {:.3f} cubic km. per year'.format(np.nansum(flux_in)*1e-9))
-
     return h
 
 
@@ -177,11 +175,11 @@ def main():
     description='''Program conserving mass and calculating ice thickness along glacier flowlines\nNot all arguments are set up for command line input. Edif input files in the configuration file''',
     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('conf', help='path to configuration file (.ini)', type=str)
-    parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=int, nargs='?')
-    parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=int, nargs='?')
-    parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=int, nargs='?')
+    parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=float, nargs='?')
+    parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=float, nargs='?')
+    parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
     parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?', default='pcloud.csv')
-    parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_false')
+    parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_true')
     args = parser.parse_args()
 
     # parse config file
@@ -204,8 +202,8 @@ def main():
     mb = float(config['param']['mb'])
     ela = float(config['param']['ela'])
     dhdt = float(config['param']['dhdt'])
-    plot = bool(config['param']['plot'])
-    
+    plot = config['param'].getboolean('plot')
+
     if args.mb:
         mb = args.mb
     if args.ela:
@@ -219,6 +217,7 @@ def main():
             out_name = out_name.split('.')[0] + '.csv'
     if args.plot:
         plot = args.plot
+
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
@@ -273,7 +272,6 @@ def main():
 
     if plot:
         fig, axs = plt.subplots(1,3,sharey=True, figsize=(15,5))
-
         ax = axs[0]
         ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
         c = ax.scatter(cx,cy,c=elev,cmap='gist_earth')
