@@ -309,8 +309,10 @@ def main():
 
     out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    out_df.to_csv(dat_path + 'out/' + out_name)
-    print('point cloud exported to:\t' + str(dat_path) + 'out/' + str(out_name))
+    path = dat_path + '../out/' + out_name
+    path = os.path.normpath(path)
+    out_df.to_csv(path)
+    print('point cloud exported to:\t' + str(path))
 
 # execute if run as a script
 if __name__ == '__main__':
