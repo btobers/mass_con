@@ -4,8 +4,14 @@ import rasterio as rio
 import matplotlib.path as path
 import geopandas as gpd
 import sys, os, argparse, configparser
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+plt.rcParams["font.family"] = "Calibri"
+plt.rcParams['font.size'] = 10
+plt.rcParams['legend.fontsize'] = 8
+
 '''
 FlowlineMassConModel.py
 
@@ -163,8 +169,15 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
 
         # now downstream
         for _j in range(start_pos[_i] + 1, dx.shape[0]):
-            lastf = h[_j-1,_i] * area_flux[_j-1, _i]
-            h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt      
+            # account for zero incoming thickness
+            if h[_j-1,_i] <= 0:
+                h[_j, _i] = np.nan
+                continue
+            lastf = h[_j-1,_i] * area_flux[_j-1, _i] 
+            thish = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt
+            if thish < 0:
+                thish = np.nan
+            h[_j, _i] = thish  
 
     return h
 
@@ -269,36 +282,104 @@ def main():
 
     # conserve max and get along-flowline thicknesses
     h = conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos)
+    # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
+    # h[h > 940] = np.nan
+
+    # outpath
+    path = dat_path + '../out/' + out_name
+    path = os.path.normpath(path)
 
     if plot:
-        fig, axs = plt.subplots(1,3,sharey=True, figsize=(15,5))
-        ax = axs[0]
-        ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax.scatter(cx,cy,c=elev,cmap='gist_earth')
-        fig.colorbar(c, ax=ax,label='elevation (m)')
-        ax.set_xlabel('x-distance (m)')
-        ax.set_ylabel('y-distance (m)')
+        fig = plt.figure(figsize=(6.5,9))
+        pad = '1%'
+        size = '2%'
+        s=5
+        gs = fig.add_gridspec(nrows=5, ncols=1, left=0.125, right=0.85, wspace=0, hspace=0.05)
 
-        ax = axs[1]
+        ax1 = fig.add_subplot(gs[1,0])
+        ax1.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        c = ax1.scatter(cx, cy, c=elev, cmap='gist_earth', s=s)
+        divider = make_axes_locatable(ax1)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        fig.colorbar(c, cax=cax, orientation='vertical', label='Elevation (m)')
+        ax1.set_ylabel('Northing (m)')
+        ax1.xaxis.set_ticks_position('both')
+        ax1.set_xticklabels([])
+        ax1.set_aspect('equal')
+
+        ax0 = fig.add_subplot(gs[0,0])
+        left, right = ax1.get_xlim()
+        bottom, top = ax1.get_ylim()
+        xx = np.arange(left, right, step=500)
+        yy = np.arange(bottom, top, step=500)
+        XX,YY = np.meshgrid(xx,yy)
+    
+        grid_coords = [(x,y) for x, y in np.column_stack((np.ravel(XX),np.ravel(YY)))]
+        vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
+        vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
+        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy, color='r',width=.003)
+        ax0.add_patch(patches.Rectangle((left,bottom), 5500, 2000, fc="w", ec='k', alpha=.8))
+        qk = ax0.quiverkey(q,  X=.05, Y=.075, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
+        ax0.set_xlim(left,right)
+        ax0.set_ylim(bottom,top)
+        divider = make_axes_locatable(ax0)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        cax.axis('off')
+        ax0.set_ylabel('Northing (m)')
+        ax0.set_xlabel('Easting (m)')   
+        ax0.xaxis.tick_top() 
+        ax0.xaxis.set_label_position('top') 
+        ax0.xaxis.set_ticks_position('both')
+
+        ax2 = fig.add_subplot(gs[2,0])
         v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
-        ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax.scatter(cx,cy,c=1e-3*smb,vmin=-1e-3*v,vmax=1e-3*v,cmap='RdBu')
-        fig.colorbar(c,ax=ax,label='annual mass balance (m w.e.)')
-        ax.set_xlabel('x-distance (m)')
+        ax2.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        c = ax2.scatter(cx, cy, c=1e-3*smb, vmin=-1e-3*v, vmax=1e-3*v, cmap='RdBu', s=s)
+        divider = make_axes_locatable(ax2)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        fig.colorbar(c, cax=cax, orientation='vertical', label='Annual mass\nbalance (m w.e.)')
+        ax2.set_ylabel('Northing (m)')
+        ax2.set_xticklabels([])
+        ax2.xaxis.set_ticks_position('both')
+        ax2.set_aspect('equal')
 
-        ax = axs[2]
-        ax.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax.scatter(cx,cy,c=h,cmap='viridis_r',vmin=200,vmax=1000)
-        c = ax.scatter(rdata.x, rdata.y, c=rdata.h, cmap='viridis_r', vmin=0,vmax=1000,zorder=100)
-        fig.colorbar(c, ax=ax,label='ice thickness (m)')
-        ax.set_xlabel('x-distance (m)')
+        ax3 = fig.add_subplot(gs[3,0])
+        ax3.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        c = ax3.scatter(cx, cy, c=h, cmap='viridis_r', vmin=200, vmax=1000, s=s)
+        c = ax3.scatter(rdata.x, rdata.y, c=rdata.h, cmap='viridis_r', s=s, vmin=0, vmax=1000, zorder=100)
+        divider = make_axes_locatable(ax3)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        fig.colorbar(c, cax=cax, orientation='vertical', label='Ice thickness (m)')
+        # ax3.set_xlabel('Easting (m)')
+        ax3.set_xticklabels([])
+        ax3.set_ylabel('Northing (m)')
+        ax3.set_aspect('equal')
+        ax3.xaxis.set_ticks_position('both')
 
-        fig.suptitle(f'mass balance gradient = {mb} mm w.e./m/yr\nela = {ela} m\ndh/dt = {dhdt} m/yr')
+        ax4 = fig.add_subplot(gs[4,0])
+        dist = np.zeros(cx.shape[0])
+        dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,3]) ** 2.0 + np.diff(cy[:,3]) ** 2.0))
+        ax4.plot(dist*1e-3, h[:,3])
+        ax4.set_ylabel('Ice Thickness (m)')
+        ax4.set_xlabel('Distance down gorge (km)')
+        ax4.invert_xaxis()
+        divider = make_axes_locatable(ax4)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        cax.axis('off')
+
+        # add hillshade to top four plots
+        ls = colors.LightSource(azdeg=315, altdeg=15)
+        z_tmp = dem_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, dem_ds.transform))
+        Z_hillshade = ls.hillshade(z_tmp,vert_exag=1000, dx=right - left,dy=top - bottom)
+        ax0.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+        ax1.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+        ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+        ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+
+        fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m/yr\nELA = {ela} m\ndh/dt = {dhdt} m/yr')
+        fig.tight_layout()
         plt.show()
-        fig.savefig(dat_path + f'out/mb_{mb}_ela_{ela}_dhdt_{dhdt}.png', dpi=300)
-
-    # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
-    # h_centroids[h_centroids > 940] = np.nan
+        fig.savefig(path[:-4] + '.png', dpi=300)
 
     # export output xyz points
     cx = np.ravel(cx, order='F')
@@ -307,8 +388,6 @@ def main():
 
     out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    path = dat_path + '../out/' + out_name
-    path = os.path.normpath(path)
     out_df.to_csv(path)
     print('point cloud exported to:\t' + str(path))
 
