@@ -356,10 +356,11 @@ def main():
         ax3.set_aspect('equal')
         ax3.xaxis.set_ticks_position('both')
 
+        line = 2
         ax4 = fig.add_subplot(gs[4,0])
         dist = np.zeros(cx.shape[0])
-        dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,3]) ** 2.0 + np.diff(cy[:,3]) ** 2.0))
-        ax4.plot(dist*1e-3, h[:,3])
+        dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,line]) ** 2.0 + np.diff(cy[:,line]) ** 2.0))
+        ax4.plot(dist*1e-3, h[:,line])
         ax4.set_ylabel('Ice Thickness (m)')
         ax4.set_xlabel('Distance down gorge (km)')
         ax4.invert_xaxis()
@@ -376,7 +377,7 @@ def main():
         ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
         ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
 
-        fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m/yr\nELA = {ela} m\ndh/dt = {dhdt} m/yr')
+        fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m\nELA = {ela} m\ndh/dt = {dhdt} m/yr', fontsize=10)
         fig.tight_layout()
         plt.show()
         fig.savefig(path[:-4] + '.png', dpi=300)
