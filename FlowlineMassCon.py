@@ -36,6 +36,11 @@ outputs:
 pcloud: file of size (#Steps x #Flowlines - 1, 3) containing x-coordinates, y-coordinates, thicknesses
 '''
 
+def getEquidistantPoints(p1, p2, parts):
+    return zip(np.linspace(p1[0], p2[0], parts+1),
+               np.linspace(p1[1], p2[1], parts+1))
+
+
 # make sure vx and vy rasters are same size and extent
 def check_rasters(r1, r2):
     if r1.transform != r2.transform:
@@ -47,14 +52,21 @@ def check_rasters(r1, r2):
 
 
 # sample raster at all x,y locations using two 2d x,y input arrays
-def sample_2d_raster(xy, r_ds):
-    # instantiate output array
-    vals = np.full((xy.shape[:2]), np.nan)
-
-    # sample raster
-    for _i in range(vals.shape[1]):
-        vals[:,_i] = np.asarray([x[0] for x in r_ds.sample(xy[:,_i,:])])
+def sample_2d_raster(x, y, r_ds, mean=False):
+    # if mean - we will get mean of pixels in between flowline vertices
+    if mean:
+        vals = np.full((x.shape[0],x.shape[1]-1), np.nan)
+        for _i in range(vals.shape[1]):
+            for _j in range(vals.shape[0]):
+                pts = getEquidistantPoints((x[_j,_i], y[_j,_i]), (x[_j,_i+1], y[_j,_i+1]), 10)
+                vals[_j,_i] = np.nanmean(np.asarray([x[0] for x in r_ds.sample(pts)]))
     
+    else:
+        vals = np.full(x.shape, np.nan)
+        # sample raster
+        for _i in range(vals.shape[1]):
+            vals[:,_i] = np.asarray([x[0] for x in r_ds.sample(np.column_stack((x[:,_i], y[:,_i])))])
+
     return vals
 
 
@@ -240,9 +252,7 @@ def main():
     # verts_y = verts_y[:,:-1]
 
     # get centroids
-    cx, cy, dx, dy = get_centroids(verts_x,verts_y)
-    # stack x,y centroid pairs
-    cxcy = np.dstack((cx, cy))
+    cx, cy, dx, dy = get_centroids(verts_x, verts_y)
 
     # x and y component surface velocities
     vx_ds = rio.open(dat_path + vx_ds, 'r')
@@ -272,10 +282,10 @@ def main():
     # trim all centroid points upglacer from thickness measurments
     start_pos = get_starts(cx, cy, coords_in)
 
-    # sample vx, vy, and elev
-    vx = sample_2d_raster(cxcy, vx_ds)
-    vy = sample_2d_raster(cxcy, vy_ds)
-    elev = sample_2d_raster(cxcy, dem_ds)
+    # sample vx, vy, and elev - we'll take average raster value in between flowline vertices
+    vx = sample_2d_raster(verts_x, verts_y, vx_ds, mean=True)
+    vy = sample_2d_raster(verts_x, verts_y, vy_ds, mean=True)
+    elev = sample_2d_raster(verts_x, verts_y, dem_ds, mean=True)
 
     # get surface mass balance
     smb = get_smb(elev, mb, ela)
