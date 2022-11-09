@@ -159,10 +159,9 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     h = np.full_like(dx, np.nan)
     flux_in = []
 
-    # convert smb from mm w.e. to m ice
-    smb = smb / 1000
-    # convert to meters ice equiv.
-    smb = smb * 1000 / 917
+    # convert smb from mm w.e. to m ice equivalent 
+    smb = smb / 1000            # mm to m
+    smb = smb * 1000 / 917      # m water to m ice
 
     # iterate through each flowline, get vx and vy arrays
     for _i in range(dx.shape[1]):
