@@ -133,7 +133,7 @@ def get_thickness_input(verts_x, verts_y, thick_gdf):
     return h_in, coords_in
 
 
-# for each flowline pair, centroid coordinate pair closest to the average thickness measurment location for that flowband - this will be the location where we define the known thickness
+# for each flowline pair, get the centroid coordinate pair closest to the average thickness measurment location for that flowband - this will be the location where we define the known thickness
 def get_starts(cx, cy, coords_in):
     start_pos = np.zeros(cx.shape[1])
     for _i in range(cx.shape[1]):
@@ -328,8 +328,8 @@ def main():
         vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
         vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
         q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy, color='r',width=.003)
-        ax0.add_patch(patches.Rectangle((left,bottom), 5500, 2000, fc="w", ec='k', alpha=.8))
-        qk = ax0.quiverkey(q,  X=.05, Y=.075, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
+        ax0.add_patch(patches.FancyBboxPatch((left+100,bottom+100), 4250, 1500, fc="w", ec='gray', alpha=.8, boxstyle='round'))
+        qk = ax0.quiverkey(q,  X=.05, Y=.08, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
         ax0.set_xlim(left,right)
         ax0.set_ylim(bottom,top)
         divider = make_axes_locatable(ax0)
@@ -369,11 +369,19 @@ def main():
         line = 2
         ax4 = fig.add_subplot(gs[4,0])
         dist = np.zeros(cx.shape[0])
-        dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,line]) ** 2.0 + np.diff(cy[:,line]) ** 2.0))
-        ax4.plot(dist*1e-3, h[:,line])
-        ax4.set_ylabel('Ice Thickness (m)')
+        dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,line]) ** 2.0 + np.diff(cy[:,line]) ** 2.0))*1e-3
+        l1, = ax4.plot(dist, elev[:,line], c='k')
+        l2, = ax4.plot(dist, elev[:,line] - h[:,line], c='tab:gray')
+        bed = elev[:,line] - h[:,line]
+        ax4.fill_between(dist, bed, elev[:,line], color='tab:blue', alpha=0.2)
+        d0 = (np.sqrt((cx[0,line] - coords_in[line,0]) ** 2.0 + (cy[0,line] - coords_in[line,1]) ** 2.0))*1e-3
+        i0 = (np.abs(dist - d0)).argmin()
+        l3 = ax4.vlines(x=d0, color='tab:gray', ls='--', zorder=-1000, ymin=bed[i0], ymax=elev[i0,line])
+        ax4.set_ylabel('Elevation (m)')
+        ax4.set_yticks([-500, 0, 500, 1000, 1500])
         ax4.set_xlabel('Distance down gorge (km)')
         ax4.invert_xaxis()
+        ax4.legend(handles=[l1,l3,l2], labels=['IFSAR surface','Known thickness', 'Modeled bed'])
         divider = make_axes_locatable(ax4)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
@@ -386,7 +394,6 @@ def main():
         ax1.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
         ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
         ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-
         fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m\nELA = {ela} m\ndh/dt = {dhdt} m/yr', fontsize=10)
         fig.tight_layout()
         plt.show()
