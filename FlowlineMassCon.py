@@ -346,7 +346,7 @@ def main():
         c = ax2.scatter(cx, cy, c=1e-3*smb, vmin=-1e-3*v, vmax=1e-3*v, cmap='RdBu', s=s)
         divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, orientation='vertical', label='Annual mass\nbalance (m w.e.)')
+        fig.colorbar(c, cax=cax, orientation='vertical', label='Modeled annual\nmass balance (m w.e.)')
         ax2.set_ylabel('Northing (m)')
         ax2.set_xticklabels([])
         ax2.xaxis.set_ticks_position('both')
