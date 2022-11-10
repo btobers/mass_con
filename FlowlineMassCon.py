@@ -175,8 +175,8 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
         # iterate over all centroids and get thickness - we'll use two for loops, one for going upstream and one for going downstream. there's probably a more efficient way to do this
         # go upstream first
         for _j in range(start_pos[_i] - 1, -1, -1):
-            lastf = h[_j+1,_i] * area_flux[_j+1, _i]
-            h[_j, _i] = (lastf  - smb[_j,_i] - dhdt) / area_flux[_j, _i]
+            qout = h[_j+1,_i] * area_flux[_j+1, _i]
+            h[_j, _i] = (qout  + (smb[_j,_i] - dhdt)) / area_flux[_j, _i]
 
         # now downstream
         for _j in range(start_pos[_i] + 1, dx.shape[0]):
@@ -184,8 +184,8 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
             if h[_j-1,_i] <= 0:
                 h[_j, _i] = np.nan
                 continue
-            lastf = h[_j-1,_i] * area_flux[_j-1, _i] 
-            thish = (lastf - smb[_j,_i] - dhdt) / area_flux[_j, _i]
+            qin = h[_j-1,_i] * area_flux[_j-1, _i] 
+            thish = (qin - (smb[_j,_i] - dhdt)) / area_flux[_j, _i]
             if thish < 0:
                 thish = np.nan
             h[_j, _i] = thish  
