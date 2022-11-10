@@ -143,7 +143,7 @@ def get_starts(cx, cy, coords_in):
     return start_pos.astype(int)
 
 
-def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
+def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
     '''
     we determine the ice thickness along flowlines by conservation of mass
 
@@ -166,7 +166,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
     # iterate through each flowline, get vx and vy arrays
     for _i in range(dx.shape[1]):
         # get area flux through each centroid, determined by (vy*dx-vx*dy)
-        area_flux[:, _i] = np.abs((vx[:, _i] * dy[:, _i]) - (vy[:, _i] * dx[:, _i]))
+        area_flux[:, _i] = np.abs((vx[:, _i] * dy[:, _i]) - (vy[:, _i] * dx[:, _i]))*gamma
 
         # determine input ice flux, as (h*(vy*dx-vx*dy)) - this is the quantity that will be conserved along each flowline
         flux_in.append(h_in[_i] * area_flux[start_pos[_i], _i])
@@ -176,7 +176,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
         # go upstream first
         for _j in range(start_pos[_i] - 1, -1, -1):
             lastf = h[_j+1,_i] * area_flux[_j+1, _i]
-            h[_j, _i] = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt
+            h[_j, _i] = (lastf  - smb[_j,_i] - dhdt) / area_flux[_j, _i]
 
         # now downstream
         for _j in range(start_pos[_i] + 1, dx.shape[0]):
@@ -185,10 +185,12 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos):
                 h[_j, _i] = np.nan
                 continue
             lastf = h[_j-1,_i] * area_flux[_j-1, _i] 
-            thish = (lastf / area_flux[_j, _i]) + smb[_j,_i] - dhdt
+            thish = (lastf - smb[_j,_i] - dhdt) / area_flux[_j, _i]
             if thish < 0:
                 thish = np.nan
             h[_j, _i] = thish  
+
+    print(f'Total input ice flux: {np.sum(flux_in)*1e-9} km^3/year')
 
     return h
 
@@ -202,6 +204,7 @@ def main():
     parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=float, nargs='?')
     parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=float, nargs='?')
     parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
+    parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
     parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?', default='pcloud.csv')
     parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_true')
     args = parser.parse_args()
@@ -234,6 +237,11 @@ def main():
         ela = args.ela
     if args.dhdt:
         dhdt = args.dhdt
+    if args.gamma:
+        gamma = args.gamma
+        if (gamma <= 0) or (gamma > 1):
+            print('Error: gamma must be greater than 0 and less than or equal to 1.')
+            sys.exit(1)
     if args.out_name:
         out_name = args.out_name
         # make sure endswith csv
@@ -290,7 +298,7 @@ def main():
     smb = get_smb(elev, mb, ela)
 
     # conserve max and get along-flowline thicknesses
-    h = conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos)
+    h = conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma)
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h[h > 940] = np.nan
 
@@ -326,7 +334,7 @@ def main():
         grid_coords = [(x,y) for x, y in np.column_stack((np.ravel(XX),np.ravel(YY)))]
         vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
         vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
-        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy, color='r',width=.003)
+        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy)
         ax0.add_patch(patches.FancyBboxPatch((left+100,bottom+100), 4250, 1500, fc="w", ec='gray', alpha=.8, boxstyle='round'))
         qk = ax0.quiverkey(q,  X=.05, Y=.08, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
         ax0.set_xlim(left,right)
