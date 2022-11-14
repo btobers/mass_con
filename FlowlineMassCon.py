@@ -147,12 +147,28 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
     '''
     we determine the ice thickness along flowlines by conservation of mass
 
-    the ice flux through a segment (dx, dy) is (v_surface * h), where v_surface is the surface velocity normal to the flux gate segment and h is the ice thickness.
-    the unit normal to (dx, dy) is sqrt(dx^2 + dy^2).
-    the normal surface velocity through a segment (dx, dy) is ((vy*dx - vx*dy) / sqrt(dx^2 + dy^2))
-    therefore the ice flux through a segment (dx, dy) simplifies to (h*(vy*dx-vx*dy))
+    following McNabb et al., 2012, we can express the upstream ice thickness as \frac{q_{out} + \int_S (\dot{b}_{sfc} + \frac{\partial h}{\partial t})dS }{\gamma W_{R} v_{sfc}},
 
-    here, we'll refer to (vy*dx-vx*dy) as our area flux
+    where q_{out} is the downstream ice flux at boundary R,  \dot{b}_{sfc} is the surface mass balance, \frac{\partial h}{\partial t} is the surface elevation change rate, 
+
+    \gamma is the factor relating observed surface velocity to the depth-averaged velocity, W_{R} is the length of downstream boundary R, and v_{sfc} is the normal surface velocity.
+
+    the downstream ice thickness is then: \frac{q_{in} - \int_S (\dot{b}_{sfc} + \frac{\partial h}{\partial t})dS }{\gamma W_{P} v_{sfc}},
+
+    where q_{in} is the upstream ice flux at boundary P, and W_{P} is the length of upstream boundary P.
+    
+
+    our observable here is the surface velocity at each cell and the length of each upstream and downstream boundary.
+
+    for a segment of ice (dx, dy), the unit normal to (dx, dy) is sqrt(dx^2 + dy^2)
+
+    the normal surface velocity through segment (dx, dy) then is: ((vy*dx - vx*dy) / sqrt(dx^2 + dy^2)), 
+
+    which simplifies to (vy*dx - vx*dy)
+
+    dx and dy here represent the x and y distance between consecutive flowband vertices, where sqrt(dx^2 + dy^2) is the length of upstream or downstream boundaries P and R
+
+    in our ice thickness equations from McNabb et al., 2012, (vy*dx - vx*dy)*\gamma represents our denominator (\gamma * W * v_{sfc}), which we'll refer to as the area flux
     '''
     # step along flowlines and get vx vy for each centroid
     area_flux = np.full_like(dx, np.nan)
@@ -186,6 +202,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
                 continue
             qin = h[_j-1,_i] * area_flux[_j-1, _i] 
             thish = (qin - (smb[_j,_i] - dhdt)) / area_flux[_j, _i]
+            # constrain downstream thickness to positive values
             if thish < 0:
                 thish = np.nan
             h[_j, _i] = thish  
