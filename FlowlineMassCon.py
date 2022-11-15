@@ -207,7 +207,8 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
 def main():
     # Set up CLI
     parser = argparse.ArgumentParser(
-    description='''Program conserving mass and calculating ice thickness along glacier flowlines\nNot all arguments are set up for command line input. Edif input files in the configuration file''',
+    description='''Program conserving mass and calculating ice thickness along glacier flowlines\nNot all arguments are set up for command line input. Edif input files in the configuration file\n\n
+                    Example call: $python FlowlineMassCon.py config.ini -mb 4 -ela 1000 -dhdt -0.5 -gamma 0.8 -plot''',
     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('conf', help='path to configuration file (.ini)', type=str)
     parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=float, nargs='?')
@@ -235,11 +236,14 @@ def main():
     dem_ds = config['path']['dem']
     rdata = config['path']['rdata']
     out_name = config['path']['out_name']
+    gamma = float(config['param']['gamma'])
     mb = float(config['param']['mb'])
     ela = float(config['param']['ela'])
     dhdt = float(config['param']['dhdt'])
     plot = config['param'].getboolean('plot')
 
+    if args.gamma:
+        gamma = args.gamma
     if args.mb:
         mb = args.mb
     if args.ela:
@@ -248,16 +252,13 @@ def main():
         dhdt = args.dhdt
     if args.gamma:
         gamma = args.gamma
-        if (gamma <= 0) or (gamma > 1):
-            print('Error: gamma must be greater than 0 and less than or equal to 1.')
-            sys.exit(1)
     if args.out_name:
         out_name = args.out_name
         # make sure endswith csv
         if not out_name.endswith('.csv'):
             out_name = out_name.split('.')[0] + '.csv'
     if args.plot:
-        plot = args.plot
+        plot = args.plot    
 
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
