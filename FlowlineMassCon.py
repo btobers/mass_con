@@ -61,7 +61,9 @@ def sample_2d_raster(x, y, r_ds, mean=False):
         for _i in range(vals.shape[1]):
             for _j in range(vals.shape[0]):
                 pts = getEquidistantPoints((x[_j,_i], y[_j,_i]), (x[_j,_i+1], y[_j,_i+1]), 10)
-                vals[_j,_i] = np.nanmean(np.asarray([x[0] for x in r_ds.sample(pts)]))
+                smpls = np.asarray([x[0] for x in r_ds.sample(pts)])
+                smpls[smpls == r_ds.nodata] = np.nan
+                vals[_j,_i] = np.nanmean(smpls)
     
     else:
         vals = np.full(x.shape, np.nan)
