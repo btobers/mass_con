@@ -74,27 +74,33 @@ def sample_2d_raster(x, y, r_ds, mean=False):
     return vals
 
 
-# go through x and y flowline vertices and get centroid locations
+# go through x and y flowline vertices and get centroid locations, as well as cell area
 def get_centroids(verts_x, verts_y):
     # first make sure verts_x and verts_y are same size
     r, c = verts_x.shape
     if (r,c) != verts_y.shape:
         exit(1)
-    # instantiate cx,cy,dx,dy
-    cx = np.zeros((r,c-1))
-    cy = np.zeros((r,c-1))
-    dx = np.zeros((r,c-1))
-    dy = np.zeros((r,c-1))
+    # instantiate cx,cy,dx,dy,area
+    cx = np.zeros((r-1,c-1))
+    cy = np.zeros((r-1,c-1))
+    dx = np.zeros((r-1,c-1))
+    dy = np.zeros((r-1,c-1))
+    area = np.zeros((r-1,c-1))
 
-    # go along flowline pairs and get centroid location as well as deltax and deltay
+    # go along flowline pairs and get centroid location as well as deltax and deltay between consecutive vertices (used to get cell boundary length)
     for _i in range(c - 1):
-        for _j in range(r):
-            cx[_j, _i] = (verts_x[_j,_i] + verts_x[_j,_i+1])/2
-            cy[_j, _i] = (verts_y[_j,_i] + verts_y[_j,_i+1])/2
+        for _j in range(r - 1):
+            coords = (  (verts_x[_j,_i],verts_y[_j,_i]),
+                        (verts_x[_j,_i+1],verts_y[_j,_i+1]),
+                        (verts_x[_j+1,_i+1],verts_y[_j+1,_i+1]),
+                        (verts_x[_j+1,_i],verts_y[_j+1,_i]))
+            poly = geometry.Polygon(coords)
+            area[_j,_i] = poly.area
+            centroid = poly.centroid
+            cx[_j,_i], cy[_j,_i] = centroid.x, centroid.y
             dx[_j, _i] = verts_x[_j,_i+1] - verts_x[_j,_i]
             dy[_j, _i] = verts_y[_j,_i+1] - verts_y[_j,_i]
-
-    return cx, cy, dx, dy
+    return cx, cy, dx, dy, area
 
 
 # function to get the surface mass balance at a given elevation given a mass balance gradient (mm/m/yr) and an equilibrium line altitue (ELA; (m))
@@ -147,7 +153,7 @@ def get_starts(cx, cy, coords_in):
     return start_pos.astype(int)
 
 
-def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
+def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_in, start_pos, gamma):
     '''
     we determine the ice thickness along flowlines by conservation of mass
     following McNabb et al., 2012, we can express the upstream ice thickness as \frac{q_{out} + \int_S (\dot{b}_{sfc} + \frac{\partial h}{\partial t})dS }{\gamma W_{R} v_{sfc}},
@@ -173,6 +179,10 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
     smb = smb / 1000            # mm to m
     smb = smb * 1000 / 917      # m water to m ice
 
+    # need to trim off last row in vx vy matrices, since we aren't deriving downstream thickness past last centroid
+    vx = vx[:-1,:]
+    vy = vy[:-1,:]
+
     # iterate through each flowline, get vx and vy arrays
     for _i in range(dx.shape[1]):
         # get area flux through each centroid, determined by (vy*dx-vx*dy)
@@ -186,7 +196,10 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
         # go upstream first
         for _j in range(start_pos[_i] - 1, -1, -1):
             qout = h[_j+1,_i] * area_flux[_j+1, _i]
-            h[_j, _i] = (qout  + (smb[_j,_i] - dhdt)) / area_flux[_j, _i]
+            thish = (qout  + (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
+            if thish < 0:
+                thish = np.nan 
+            h[_j, _i] = thish  
 
         # now downstream
         for _j in range(start_pos[_i] + 1, dx.shape[0]):
@@ -195,7 +208,7 @@ def conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma):
                 h[_j, _i] = np.nan
                 continue
             qin = h[_j-1,_i] * area_flux[_j-1, _i] 
-            thish = (qin - (smb[_j,_i] - dhdt)) / area_flux[_j, _i]
+            thish = (qin - (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
             # constrain downstream thickness to positive values
             if thish < 0:
                 thish = np.nan
@@ -213,7 +226,7 @@ def main():
                     Example call: $python FlowlineMassCon.py config.ini -mb 4 -ela 1000 -dhdt -0.5 -gamma 0.8 -plot''',
     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('conf', help='path to configuration file (.ini)', type=str)
-    parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m)', type=float, nargs='?')
+    parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m/y)', type=float, nargs='?')
     parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=float, nargs='?')
     parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
@@ -244,23 +257,23 @@ def main():
     dhdt = float(config['param']['dhdt'])
     plot = config['param'].getboolean('plot')
 
-    if args.gamma:
+    if args.gamma is not None:
         gamma = args.gamma
-    if args.mb:
+    if args.mb is not None:
         mb = args.mb
-    if args.ela:
+    if args.ela is not None:
         ela = args.ela
-    if args.dhdt:
+    if args.dhdt is not None:
         dhdt = args.dhdt
-    if args.gamma:
-        gamma = args.gamma
-    if args.out_name:
+    if args.out_name is not None:
         out_name = args.out_name
         # make sure endswith csv
         if not out_name.endswith('.csv'):
             out_name = out_name.split('.')[0] + '.csv'
     if args.plot:
         plot = args.plot    
+
+    print(f'Mass Balance Gradient:\t\t{mb} mm w.e./m/y\nEquilibrium Line Altutde:\t{ela} m\nSurface Elevation Change Rate:\t{dhdt} m/y')
 
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
@@ -271,7 +284,7 @@ def main():
     # verts_y = verts_y[:,:-1]
 
     # get centroids
-    cx, cy, dx, dy = get_centroids(verts_x, verts_y)
+    cx, cy, dx, dy, area = get_centroids(verts_x, verts_y)
 
     # x and y component surface velocities
     vx_ds = rio.open(dat_path + vx_ds, 'r')
@@ -304,13 +317,13 @@ def main():
     # sample vx, vy, and elev - we'll take average raster value in between flowline vertices
     vx = sample_2d_raster(verts_x, verts_y, vx_ds, mean=True)
     vy = sample_2d_raster(verts_x, verts_y, vy_ds, mean=True)
-    elev = sample_2d_raster(verts_x, verts_y, dem_ds, mean=True)
+    elev = sample_2d_raster(cx, cy, dem_ds)
 
     # get surface mass balance
     smb = get_smb(elev, mb, ela)
 
     # conserve max and get along-flowline thicknesses
-    h = conserve_mass(dx, dy, vx, vy, smb, dhdt, h_in, start_pos, gamma)
+    h = conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_in, start_pos, gamma)
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h[h > 940] = np.nan
 
