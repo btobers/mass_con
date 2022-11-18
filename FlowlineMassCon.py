@@ -280,10 +280,6 @@ def main():
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
 
-    # # clip ruth vertices to first half
-    verts_x=verts_x[:165,:]
-    verts_y=verts_y[:165,:]
-
     # remove first flowline - seems to be some issues on output of this one, perhaps too close to gorge edge
     # verts_x = verts_x[:,:-1]
     # verts_y = verts_y[:,:-1]
