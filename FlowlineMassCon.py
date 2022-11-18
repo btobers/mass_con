@@ -9,6 +9,7 @@ import matplotlib.path as path
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
+import matplotlib.ticker as tkr
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 plt.rcParams["font.family"] = "Calibri"
 plt.rcParams['font.size'] = 10
@@ -280,8 +281,8 @@ def main():
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
 
     # # clip ruth vertices to first half
-    # verts_x=verts_x[:165,:]
-    # verts_y=verts_y[:165,:]
+    verts_x=verts_x[:165,:]
+    verts_y=verts_y[:165,:]
 
     # remove first flowline - seems to be some issues on output of this one, perhaps too close to gorge edge
     # verts_x = verts_x[:,:-1]
@@ -336,6 +337,7 @@ def main():
     path = os.path.normpath(path)
 
     if plot:
+
         fig = plt.figure(figsize=(6,9))
         pad = '1%'
         size = '2%'
@@ -348,10 +350,11 @@ def main():
         divider = make_axes_locatable(ax1)
         cax = divider.append_axes("right", size=size, pad=pad)
         fig.colorbar(c, cax=cax, orientation='vertical', label='Elevation (m)')
-        ax1.set_ylabel('Northing (m)')
+        ax1.set_ylabel('Northing (km)')
         ax1.xaxis.set_ticks_position('both')
         ax1.set_xticklabels([])
         ax1.set_aspect('equal')
+        ax1.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         ax0 = fig.add_subplot(gs[0,0])
         left, right = ax1.get_xlim()
@@ -371,11 +374,13 @@ def main():
         divider = make_axes_locatable(ax0)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
-        ax0.set_ylabel('Northing (m)')
-        ax0.set_xlabel('Easting (m)')   
+        ax0.set_ylabel('Northing (km)')
+        ax0.set_xlabel('Easting (km)')   
         ax0.xaxis.tick_top() 
         ax0.xaxis.set_label_position('top') 
         ax0.xaxis.set_ticks_position('both')
+        ax0.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
+        ax0.xaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         ax2 = fig.add_subplot(gs[2,0])
         v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
@@ -384,10 +389,11 @@ def main():
         divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
         fig.colorbar(c, cax=cax, orientation='vertical', label='Modeled annual\nmass balance (m w.e.)')
-        ax2.set_ylabel('Northing (m)')
+        ax2.set_ylabel('Northing (km)')
         ax2.set_xticklabels([])
         ax2.xaxis.set_ticks_position('both')
         ax2.set_aspect('equal')
+        ax2.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         ax3 = fig.add_subplot(gs[3,0])
         ax3.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
@@ -398,9 +404,10 @@ def main():
         fig.colorbar(c, cax=cax, orientation='vertical', label='Ice thickness (m)')
         # ax3.set_xlabel('Easting (m)')
         ax3.set_xticklabels([])
-        ax3.set_ylabel('Northing (m)')
+        ax3.set_ylabel('Northing (km)')
         ax3.set_aspect('equal')
         ax3.xaxis.set_ticks_position('both')
+        ax3.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         line = 2
         ax4 = fig.add_subplot(gs[4,0])
@@ -414,17 +421,14 @@ def main():
         d0 = (np.sqrt((cx[0,line] - coords_in[line,0]) ** 2.0 + (cy[0,line] - coords_in[line,1]) ** 2.0))*1e-3
         i0 = (np.abs(dist - d0)).argmin()
         l3 = ax4.vlines(x=d0, color='tab:gray', ls='--', zorder=-1000, ymin=bed[i0], ymax=elev[i0,line])
-        if np.nanmin(diff) < 100:
-            idx = dist[diff.argmin()]
-        else:
-            idx = -1e3
+        idx = dist[diff.argmin()]       
         l4 = ax4.axvline(x=idx, color='tab:brown', ls='--', zorder=-1000)
         ax4.set_ylabel('Elevation (m)')
-        ax4.set_xlabel('Distance from seed points(km)')
+        ax4.set_xlabel('Distance from seed points (km)')
         ax4.set_xlim([dist.min()-1.5,dist.max()+1.5])
         ax4.set_ylim([0, round(elev[:,line].max(),-3)])
         ax4.invert_xaxis()
-        ax4.legend(handles=[l1,l4,l3,l2], labels=['IFSAR surface','Equilibrium Line Altitude','Known thickness', 'Modeled bed'], framealpha=0.5)
+        ax4.legend(handles=[l1,l4,l3,l2], labels=['IFSAR surface', 'Equilibrium Line Altitude', 'Known thickness', 'Modeled bed'], framealpha=0.5)
         divider = make_axes_locatable(ax4)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
@@ -439,8 +443,9 @@ def main():
         ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
         fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m\nELA = {ela} m\ndh/dt = {dhdt} m/yr', fontsize=10)
         fig.tight_layout()
-        plt.show()
-        fig.savefig(path[:-4] + '.png', dpi=300)
+        if idx >0:
+            plt.show()
+            fig.savefig(path[:-4] + '.jpg', dpi=200)
 
     # export output xyz points
     cx = np.ravel(cx, order='F')
