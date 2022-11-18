@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 from rasterio.mask import mask
-import matplotlib.path as path
 import geopandas as gpd
 from shapely import geometry
 import sys, os, argparse, configparser
+import matplotlib.path as path
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
@@ -279,6 +279,10 @@ def main():
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
 
+    # # clip ruth vertices to first half
+    # verts_x=verts_x[:165,:]
+    # verts_y=verts_y[:165,:]
+
     # remove first flowline - seems to be some issues on output of this one, perhaps too close to gorge edge
     # verts_x = verts_x[:,:-1]
     # verts_y = verts_y[:,:-1]
@@ -332,7 +336,7 @@ def main():
     path = os.path.normpath(path)
 
     if plot:
-        fig = plt.figure(figsize=(6.5,9))
+        fig = plt.figure(figsize=(6,9))
         pad = '1%'
         size = '2%'
         s=5
@@ -360,8 +364,8 @@ def main():
         vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
         vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
         q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy)
-        ax0.add_patch(patches.FancyBboxPatch((left+100,bottom+100), 4250, 1500, fc="w", ec='gray', alpha=.8, boxstyle='round'))
-        qk = ax0.quiverkey(q,  X=.05, Y=.08, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
+        ax0.add_patch(patches.FancyBboxPatch((left+100,top-1250), 2500, 1100, fc="w", ec='gray', alpha=.8, boxstyle='round'))
+        qk = ax0.quiverkey(q,  X=.05, Y=.85, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
         ax0.set_xlim(left,right)
         ax0.set_ylim(bottom,top)
         divider = make_axes_locatable(ax0)
@@ -376,7 +380,7 @@ def main():
         ax2 = fig.add_subplot(gs[2,0])
         v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
         ax2.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax2.scatter(cx, cy, c=1e-3*smb, vmin=-1e-3*v, vmax=1e-3*v, cmap='RdBu', s=s)
+        c = ax2.scatter(cx, cy, c=1e-3*smb, vmin=-3, vmax=3, cmap='RdBu', s=s)
         divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
         fig.colorbar(c, cax=cax, orientation='vertical', label='Modeled annual\nmass balance (m w.e.)')
@@ -387,8 +391,8 @@ def main():
 
         ax3 = fig.add_subplot(gs[3,0])
         ax3.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
-        c = ax3.scatter(cx, cy, c=h, cmap='viridis_r', vmin=200, vmax=1000, s=s)
-        c = ax3.scatter(rdata.x, rdata.y, c=rdata.h, cmap='viridis_r', s=s, vmin=0, vmax=1000, zorder=100)
+        c = ax3.scatter(cx, cy, c=h, cmap='YlGnBu', vmin=200, vmax=1000, s=s)
+        c = ax3.scatter(rdata.x, rdata.y, c=rdata.h, cmap='YlGnBu', s=s, vmin=0, vmax=1000, zorder=100)
         divider = make_axes_locatable(ax3)
         cax = divider.append_axes("right", size=size, pad=pad)
         fig.colorbar(c, cax=cax, orientation='vertical', label='Ice thickness (m)')
@@ -402,6 +406,7 @@ def main():
         ax4 = fig.add_subplot(gs[4,0])
         dist = np.zeros(cx.shape[0])
         dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,line]) ** 2.0 + np.diff(cy[:,line]) ** 2.0))*1e-3
+        diff = np.abs(elev[:,line] - ela)
         l1, = ax4.plot(dist, elev[:,line], c='k')
         l2, = ax4.plot(dist, elev[:,line] - h[:,line], c='tab:gray')
         bed = elev[:,line] - h[:,line]
@@ -409,11 +414,17 @@ def main():
         d0 = (np.sqrt((cx[0,line] - coords_in[line,0]) ** 2.0 + (cy[0,line] - coords_in[line,1]) ** 2.0))*1e-3
         i0 = (np.abs(dist - d0)).argmin()
         l3 = ax4.vlines(x=d0, color='tab:gray', ls='--', zorder=-1000, ymin=bed[i0], ymax=elev[i0,line])
+        if np.nanmin(diff) < 100:
+            idx = dist[diff.argmin()]
+        else:
+            idx = -1e3
+        l4 = ax4.axvline(x=idx, color='tab:brown', ls='--', zorder=-1000)
         ax4.set_ylabel('Elevation (m)')
-        ax4.set_yticks([-500, 0, 500, 1000, 1500])
-        ax4.set_xlabel('Distance down gorge (km)')
+        ax4.set_xlabel('Distance from seed points(km)')
+        ax4.set_xlim([dist.min()-1.5,dist.max()+1.5])
+        ax4.set_ylim([0, round(elev[:,line].max(),-3)])
         ax4.invert_xaxis()
-        ax4.legend(handles=[l1,l3,l2], labels=['IFSAR surface','Known thickness', 'Modeled bed'])
+        ax4.legend(handles=[l1,l4,l3,l2], labels=['IFSAR surface','Equilibrium Line Altitude','Known thickness', 'Modeled bed'], framealpha=0.5)
         divider = make_axes_locatable(ax4)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
