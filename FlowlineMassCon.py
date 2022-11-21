@@ -454,7 +454,7 @@ def main():
 
     out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    out_df.to_csv(path)
+    # out_df.to_csv(path)
     print('point cloud exported to:\t' + str(path))
 
 # execute if run as a script
