@@ -197,7 +197,7 @@ def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_in, start_pos, gamma):
         # go upstream first
         for _j in range(start_pos[_i] - 1, -1, -1):
             qout = h[_j+1,_i] * area_flux[_j+1, _i]
-            thish = (qout  + (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
+            thish = (qout  - (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
             if thish < 0:
                 thish = np.nan 
             h[_j, _i] = thish  
@@ -209,7 +209,7 @@ def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_in, start_pos, gamma):
                 h[_j, _i] = np.nan
                 continue
             qin = h[_j-1,_i] * area_flux[_j-1, _i] 
-            thish = (qin - (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
+            thish = (qin + (smb[_j,_i] - dhdt)*(area[_j,_i])) / area_flux[_j, _i]
             # constrain downstream thickness to positive values
             if thish < 0:
                 thish = np.nan
