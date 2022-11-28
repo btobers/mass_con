@@ -274,15 +274,15 @@ def main():
     if args.plot:
         plot = args.plot    
 
-    print(f'Mass Balance Gradient:\t\t{mb} mm w.e./m/y\nEquilibrium Line Altutde:\t{ela} m\nSurface Elevation Change Rate:\t{dhdt} m/y')
+    print(f'Mass Balance Gradient:\t\t{mb} mm w.e./m/y\nEquilibrium Line Altutde:\t{ela} m\nSurface Elevation Change Rate:\t{dhdt} m/y\nGamma:\t\t\t\t{gamma}')
 
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
 
-    # # clip ruth vertices to first half
-    verts_x=verts_x[:165,:]
-    verts_y=verts_y[:165,:]
+    # clip ruth vertices to first half
+    # verts_x=verts_x[:155,:]
+    # verts_y=verts_y[:155,:]
 
     # remove first flowline - seems to be some issues on output of this one, perhaps too close to gorge edge
     # verts_x = verts_x[:,:-1]
@@ -324,6 +324,11 @@ def main():
     vy = sample_2d_raster(verts_x, verts_y, vy_ds, mean=True)
     elev = sample_2d_raster(cx, cy, dem_ds)
 
+    # verts_x[-90:,-1] = np.nan
+    # verts_y[-90:,-1] = np.nan
+    # cx[-90:,-1] = np.nan
+    # cy[-90:,-1]=np.nan
+
     # get surface mass balance
     smb = get_smb(elev, mb, ela)
 
@@ -336,16 +341,17 @@ def main():
     path = dat_path + '../out/' + out_name
     path = os.path.normpath(path)
 
+
     if plot:
 
-        fig = plt.figure(figsize=(6,9))
+        fig = plt.figure(figsize=(5.2,8.25))
         pad = '1%'
         size = '2%'
         s=5
-        gs = fig.add_gridspec(nrows=5, ncols=1, left=0.125, right=0.85, wspace=0, hspace=0.05)
+        gs = fig.add_gridspec(nrows=5, ncols=1, left=0.125, right=0.850, wspace=0, hspace=0.1)
 
         ax1 = fig.add_subplot(gs[1,0])
-        ax1.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
         c = ax1.scatter(cx, cy, c=elev, cmap='gist_earth', s=s)
         divider = make_axes_locatable(ax1)
         cax = divider.append_axes("right", size=size, pad=pad)
@@ -362,13 +368,15 @@ def main():
         xx = np.arange(left, right, step=500)
         yy = np.arange(bottom, top, step=500)
         XX,YY = np.meshgrid(xx,yy)
-    
+
         grid_coords = [(x,y) for x, y in np.column_stack((np.ravel(XX),np.ravel(YY)))]
         vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
         vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
         q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy)
-        ax0.add_patch(patches.FancyBboxPatch((left+100,top-1250), 2500, 1100, fc="w", ec='gray', alpha=.8, boxstyle='round'))
-        qk = ax0.quiverkey(q,  X=.05, Y=.85, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes')
+        r = patches.Rectangle((0,0), 1, 1, fill=False, edgecolor='none',
+                                 visible=False)
+        ax0.legend([r], ['          '], framealpha=0.5, loc='upper left').set_zorder(1)
+        qk = ax0.quiverkey(q,  X=.07, Y=.8625, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes', zorder=1e5)
         ax0.set_xlim(left,right)
         ax0.set_ylim(bottom,top)
         divider = make_axes_locatable(ax0)
@@ -384,7 +392,7 @@ def main():
 
         ax2 = fig.add_subplot(gs[2,0])
         v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
-        ax2.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
         c = ax2.scatter(cx, cy, c=1e-3*smb, vmin=-3, vmax=3, cmap='RdBu', s=s)
         divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
@@ -396,7 +404,7 @@ def main():
         ax2.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         ax3 = fig.add_subplot(gs[3,0])
-        ax3.plot(verts_x[:,:],verts_y[:,:],'tab:grey',lw=.5)
+        ax3.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
         c = ax3.scatter(cx, cy, c=h, cmap='YlGnBu', vmin=200, vmax=1000, s=s)
         c = ax3.scatter(rdata.x, rdata.y, c=rdata.h, cmap='YlGnBu', s=s, vmin=0, vmax=1000, zorder=100)
         divider = make_axes_locatable(ax3)
@@ -414,21 +422,24 @@ def main():
         dist = np.zeros(cx.shape[0])
         dist[1:] = np.cumsum(np.sqrt(np.diff(cx[:,line]) ** 2.0 + np.diff(cy[:,line]) ** 2.0))*1e-3
         diff = np.abs(elev[:,line] - ela)
-        l1, = ax4.plot(dist, elev[:,line], c='k')
-        l2, = ax4.plot(dist, elev[:,line] - h[:,line], c='tab:gray')
+        l1, = ax4.plot(dist, elev[:,line], c='k',zorder=1e7)
+        l2, = ax4.plot(dist, elev[:,line] - h[:,line], c='tab:gray',zorder=1e7)
         bed = elev[:,line] - h[:,line]
-        ax4.fill_between(dist, bed, elev[:,line], color='tab:blue', alpha=0.2)
+        ax4.fill_between(dist, bed, elev[:,line], color='tab:blue', alpha=0.5,zorder=1e4)
+        ax4.fill_between(dist, bed, elev[:,line], color='white', alpha=0.5,zorder=1e4)
         d0 = (np.sqrt((cx[0,line] - coords_in[line,0]) ** 2.0 + (cy[0,line] - coords_in[line,1]) ** 2.0))*1e-3
         i0 = (np.abs(dist - d0)).argmin()
-        l3 = ax4.vlines(x=d0, color='tab:gray', ls='--', zorder=-1000, ymin=bed[i0], ymax=elev[i0,line])
+        l3 = ax4.vlines(x=d0, color='tab:gray', ls='--', lw=1, zorder=-1000, ymin=bed[i0], ymax=elev[i0,line])
+        l3.set_zorder(1e6)
         idx = dist[diff.argmin()]       
-        l4 = ax4.axvline(x=idx, color='tab:brown', ls='--', zorder=-1000)
+        l4 = ax4.axhline(y=ela, color='tab:brown', ls='--', lw=1, zorder=1e5)
         ax4.set_ylabel('Elevation (m)')
         ax4.set_xlabel('Distance from seed points (km)')
-        ax4.set_xlim([dist.min()-1.5,dist.max()+1.5])
-        ax4.set_ylim([0, round(elev[:,line].max(),-3)])
+        # ax4.set_xlim([dist.min()-1.5,dist.max()+1.5])
+        ax4.set_ylim([300, round(elev[:,line].max(),-3)])
         ax4.invert_xaxis()
-        ax4.legend(handles=[l1,l4,l3,l2], labels=['IFSAR surface', 'Equilibrium Line Altitude', 'Known thickness', 'Modeled bed'], framealpha=0.5)
+        ax4.grid(zorder=1)
+        ax4.legend(handles=[l3,l4,l1,l2], labels=['Known Thickness', 'Equilibrium Line Altitude', 'IFSAR surface', 'Modeled bed'], framealpha=1, loc='upper left', ncol=2).set_zorder(1e8)
         divider = make_axes_locatable(ax4)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
@@ -443,9 +454,10 @@ def main():
         ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
         fig.suptitle(f'Mass balance gradient = {mb} mm w.e./m\nELA = {ela} m\ndh/dt = {dhdt} m/yr', fontsize=10)
         fig.tight_layout()
+        plt.subplots_adjust(wspace=0, hspace=0)
         if idx >0:
             plt.show()
-            fig.savefig(path[:-4] + '.jpg', dpi=200)
+            # fig.savefig(path[:-4] + '.jpg', dpi=200)
 
     # export output xyz points
     cx = np.ravel(cx, order='F')
@@ -454,7 +466,7 @@ def main():
 
     out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    # out_df.to_csv(path)
+    out_df.to_csv(path)
     print('point cloud exported to:\t' + str(path))
 
 # execute if run as a script
