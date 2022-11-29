@@ -5,39 +5,49 @@ touch job.txt
 rm -f job.txt
 touch job.txt
 
-ncore=6
-plot="-plot"
+ncore=20
+# plot="-plot"
 plot=""
-mb=10
-dhdt=-0.5
-gamma=0.9
-out_path="C:/Users/btober/OneDrive/Documents/MARS/targ/modl/mass_con/ruth/"
+# mb=10
+# dhdt=-0.5
+# gamma=0.9
+out_path="/zippy/MARS/targ/modl/mass_con/ruth/out/"
 
-# loop over ela locations
-for ela in {1400..1700..10}
+# start time
+start=$SECONDS
+
+# beautiful nested nested nested nested for looooooop
+counter=0
+for ela in {1450..1650..25}
 do
-   python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"
+   for mb in {5..15..1}
+   do
+      for dhdt in $(seq -1 .25 0)
+      do 
+         for gamma in $(seq 0.9 0.05 1.0)
+         do
+            # update counter
+            counter=$[$counter + 1]
+            echo "python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"" >> job.txt
+         done
+      done
+   done
 done
 
-# loop over gamma
-ela=1550
-for gamma in $(seq 0.8 0.05 1.0)
-do
-   python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"
-done
+parallel -j $ncore < ./job.txt
 
-# loop over dhdt
-gamma=0.9
-for dhdt in $(seq -1.5 .25 1.5)
-do
-   python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"
-done
-
-# parallel -j $ncore < ./job.txt
+# completion time
+if (( $SECONDS > 3600 )) ; then
+    let "hours=SECONDS/3600"
+    let "minutes=(SECONDS%3600)/60"
+    let "seconds=(SECONDS%3600)%60"
+    echo "Completed $counter runs in $hours hour(s), $minutes minute(s) and $seconds second(s)" 
+elif (( $SECONDS > 60 )) ; then
+    let "minutes=(SECONDS%3600)/60"
+    let "seconds=(SECONDS%3600)%60"
+    echo "Completed $counter runs in $minutes minute(s) and $seconds second(s)"
+else
+    echo "Completed $counter runs in $SECONDS seconds"
+fi
 
 # rm job.txt
-
-# for ela in {1500..1510..10}
-# do
-#    python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"
-# done

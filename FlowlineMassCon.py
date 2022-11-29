@@ -338,8 +338,8 @@ def main():
     # h[h > 940] = np.nan
 
     # outpath
-    path = dat_path + '../out/' + out_name
-    path = os.path.normpath(path)
+    # path = dat_path + '../out/' + out_name
+    # path = os.path.normpath(path)
 
 
     if plot:
@@ -466,8 +466,8 @@ def main():
 
     out = np.column_stack((cx,cy,h))
     out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    out_df.to_csv(path)
-    print('point cloud exported to:\t' + str(path))
+    out_df.to_csv(out_name)
+    print('point cloud exported to:\t' + str(out_name))
 
 # execute if run as a script
 if __name__ == '__main__':
