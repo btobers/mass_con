@@ -6,7 +6,7 @@ Brandon S. Tober
 
 clc; clear all; close all;
 % load x velocity 
-dat_path            = '..\massCon\ruth\data\';
+dat_path            = 'C:\Users\btober\OneDrive\Documents\MARS\targ\modl\mass_con\ruth\data\';
 [vx,R]              = readgeoraster(strcat(dat_path, 'ALA_G0120_0000_vx_clip.tif'));
 % [vx,R]              = readgeoraster(strcat(dat_path, 'Millan_vx_clip.tif'));
 vx                  = double(vx);
@@ -118,5 +118,5 @@ for i = 1:length(verts)
     end
 end
 %% export each output array as csv
-writematrix(xout,strcat(dat_path,'verts_x.csv'));
-writematrix(yout,strcat(dat_path,'verts_y.csv'));
+writematrix(xout,strcat(dat_path,'verts_x_test.csv'));
+writematrix(yout,strcat(dat_path,'verts_y_test.csv'));
