@@ -9,27 +9,28 @@ ncore=20
 # plot="-plot"
 plot=""
 out_path="/zippy/MARS/targ/modl/mass_con/ruth/out/"
+# out_path="C:/Users/btober/OneDrive/Documents/MARS/targ/modl/mass_con/ruth/out/"
 
 # start time
 start=$SECONDS
 
 # beautiful nested nested nested nested for looooooop
 counter=0
-# for ela in {1450..1650..25}
-# do
-#    for mb in {5..15..1}
-#    do
-#       for dhdt in $(seq -1.00 .25 0.00)
-#       do
-#          for gamma in $(seq 0.90 0.05 1.00)
-#          do
-#             # update counter
-#             counter=$[$counter + 1]
-#             echo "python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"" >> job.txt
-#          done
-#       done
-#    done
-# done
+for ela in {1450..1650..25}
+do
+   for mb in {5..15..1}
+   do
+      for dhdt in $(seq -1.00 .25 0.00)
+      do
+         for gamma in $(seq 0.90 0.05 1.00)
+         do
+            # update counter
+            counter=$[$counter + 1]
+            echo "python FlowlineMassCon.py config.ini $plot -mb $mb -ela $ela -dhdt $dhdt -gamma $gamma -out_name "${out_path}mb_${mb}_ela_${ela}_dhdt_${dhdt}_gamma_$gamma.csv"" >> job.txt
+         done
+      done
+   done
+done
 
 mb=10
 dhdt=-0.50

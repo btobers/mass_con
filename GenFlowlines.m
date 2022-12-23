@@ -8,14 +8,12 @@ clc; clear all; close all;
 % load x velocity 
 dat_path            = 'C:\Users\btober\OneDrive\Documents\MARS\targ\modl\mass_con\ruth\data\';
 [vx,R]              = readgeoraster(strcat(dat_path, 'ALA_G0120_0000_vx_clip.tif'));
-% [vx,R]              = readgeoraster(strcat(dat_path, 'Millan_vx_clip.tif'));
 vx                  = double(vx);
 % replace NaN values if any exist
 vx(vx == -32767)    = NaN;
 
 % load y velocity 
 [vy,R]              = readgeoraster(strcat(dat_path, 'ALA_G0120_0000_vy_clip.tif'));
-% [vy,R]              = readgeoraster(strcat(dat_path, 'Millan_vy_clip.tif'));
 vy                  = double(vy);
 % replace NaN values if any exist
 vy(vy == -32767)    = NaN;
@@ -46,7 +44,8 @@ y                   = linspace(yExtent(1), yExtent(2), R.RasterSize(1));
 
 % load upglacier seed pts - this was created in qgis by exporting the x-y
 % coordinates of the two vertices between a simple line created upglacier
-seed_pts            = csvread(strcat(dat_path, 'seed_pts/1.csv'),1,0);
+% seed_pts            = csvread(strcat(dat_path, 'seed_pts/1.csv'),1,0);
+seed_pts            = csvread(strcat(dat_path, 'seed_pts/seeds_122322.csv'),1,0);
 % sort in by y-coordinate
 seed_pts            = sortrows(seed_pts,2, 'ascend');
 
@@ -54,7 +53,7 @@ xs = seed_pts(:,1);
 ys = seed_pts(:,2);
 
 % create evenly spaced nodes between seed endpoints
-stepSize            = 850; % [m]        distance between seedpoints in meters
+stepSize            = 1050; % [m]  810     distance between seedpoints in meters
 xcoords = xs(1);
 ycoords = ys(1);
 
@@ -91,10 +90,16 @@ for i=1:length(seed_pts) - 1
         ycoords(end+1) = ycoords(end) + (op*stepSize*sin(theta));
     end
 end
-
-
+%% manually edit last two seeds
+% xcoords = xs;
+% ycoords = ys;
+% xcoords = xcoords(1:5);
+% ycoords = ycoords(1:5);
+% xcoords(6) = xs(3);
+% ycoords(6) = ys(3);
+%%
 % generate streamlines using stream2 function
-step                = .75;
+step                = 1;
 maxvert             = 500;
 verts               = stream2(X, Y, vx, vy, xcoords, ycoords, [step maxvert]);
 %% plot
@@ -113,10 +118,12 @@ for i = 1:length(verts)
         if(isnan(verts{i}(j,1)))
             continue
         end
+        tmp((i*nverts)+j, 1) = verts{i}(j,1);
+        tmp((i*nverts)+j, 2) = verts{i}(j,2);
         xout(j,i) = verts{i}(j,1);
         yout(j,i) = verts{i}(j,2);
     end
 end
 %% export each output array as csv
-writematrix(xout,strcat(dat_path,'verts_x_test.csv'));
-writematrix(yout,strcat(dat_path,'verts_y_test.csv'));
+writematrix(xout,strcat(dat_path,'verts_x.csv'));
+writematrix(yout,strcat(dat_path,'verts_y.csv'));
