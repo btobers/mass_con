@@ -46,50 +46,55 @@ y                   = linspace(yExtent(1), yExtent(2), R.RasterSize(1));
 % coordinates of the two vertices between a simple line created upglacier
 % seed_pts            = csvread(strcat(dat_path, 'seed_pts/1.csv'),1,0);
 seed_pts            = csvread(strcat(dat_path, 'seed_pts/seeds_122322.csv'),1,0);
-% sort in by y-coordinate
-seed_pts            = sortrows(seed_pts,2, 'ascend');
+% sort by y-coordinate
+seed_pts            = sortrows(seed_pts, 1, 'ascend');
 
 xs = seed_pts(:,1);
 ys = seed_pts(:,2);
 
 % create evenly spaced nodes between seed endpoints
-stepSize            = 1050; % [m]  810     distance between seedpoints in meters
-xcoords = xs(1);
-ycoords = ys(1);
+N = 15;
+xcoords = linspace(xs(1), xs(2), N);
+ycoords = linspace(ys(1), ys(2), N);
 
-% loop through vertices and make equidistant flowline seed points between  them
-for i=1:length(seed_pts) - 1
-    
-    % first determine number of points based on desired spacing
-    if i == 1
-        dist                = sqrt((xs(i+1) - xs(i))^2 + (ys(i+1) - ys(i))^2 );
-        % get angle between two endpoints
-        theta               = atan((ys(i+1) - ys(i))/(xs(i+1) - xs(i)));     
-    elseif i > 1
-        dist                = sqrt((xs(i+1) - xcoords(end))^2 + (ys(i+1) - ycoords(end))^2 );
-        % get angle between two endpoints
-        theta               = atan((ys(i+1) - ycoords(end))/(xs(i+1) - xcoords(end)));     
-    end
-    N                   = idivide(dist, int16(stepSize));
 
-    % get operator based on theta - if theta is positive, we add below,
-    % negative we subtract
-    if theta > 0
-        op = 1;
-    elseif theta < 0
-        op = -1;
-    end
+% stepSize            = 1050; % [m]  810     distance between seedpoints in meters
+% xcoords = xs(1);
+% ycoords = ys(1);
 
-    % if on last segment, add one seed point to go to last vertex
-    if i==length(seed_pts)-1
-        N=N+1;
-    end
-    % loop through steps and add appropriate x and y components
-    for j = 1:N
-        xcoords(end+1) = xcoords(end) + (op*stepSize*cos(theta));
-        ycoords(end+1) = ycoords(end) + (op*stepSize*sin(theta));
-    end
-end
+% % loop through vertices and make equidistant flowline seed points between  them
+% for i=1:length(seed_pts) - 1
+%     
+%     % first determine number of points based on desired spacing
+%     if i == 1
+%         dist                = sqrt((xs(i+1) - xs(i))^2 + (ys(i+1) - ys(i))^2 );
+%         % get angle between two endpoints
+%         theta               = atan((ys(i+1) - ys(i))/(xs(i+1) - xs(i)));     
+%     elseif i > 1
+%         dist                = sqrt((xs(i+1) - xcoords(end))^2 + (ys(i+1) - ycoords(end))^2 );
+%         % get angle between two endpoints
+%         theta               = atan((ys(i+1) - ycoords(end))/(xs(i+1) - xcoords(end)));     
+%     end
+%     N                   = idivide(dist, int16(stepSize));
+% 
+%     % get operator based on theta - if theta is positive, we add below,
+%     % negative we subtract
+%     if theta > 0
+%         op = 1;
+%     elseif theta < 0
+%         op = -1;
+%     end
+% 
+%     % if on last segment, add one seed point to go to last vertex
+%     if i==length(seed_pts)-1
+%         N=N+1;
+%     end
+%     % loop through steps and add appropriate x and y components
+%     for j = 1:N
+%         xcoords(end+1) = xcoords(end) + (op*stepSize*cos(theta));
+%         ycoords(end+1) = ycoords(end) + (op*stepSize*sin(theta));
+%     end
+% end
 %% manually edit last two seeds
 % xcoords = xs;
 % ycoords = ys;
@@ -125,5 +130,7 @@ for i = 1:length(verts)
     end
 end
 %% export each output array as csv
-writematrix(xout,strcat(dat_path,'verts_x.csv'));
-writematrix(yout,strcat(dat_path,'verts_y.csv'));
+out_dir = strcat(dat_path,'sensitivity/', num2str(N), '_seeds');
+mkdir(out_dir);
+writematrix(xout,strcat(out_dir, '/verts_x.csv'));
+writematrix(yout,strcat(out_dir, '/verts_y.csv'));

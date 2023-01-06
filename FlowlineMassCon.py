@@ -319,7 +319,7 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         ax2.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
         # subplot 4 - elevation cross section along flowline
-        line = 2
+        line = 1
         ax3 = fig.add_subplot(gs[3,0])
         # create flowband distance array
         dist = np.zeros(mx.shape[0])
@@ -372,8 +372,8 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
             
         fig.tight_layout()
         plt.subplots_adjust(wspace=0, hspace=0)
-        # plt.show()
-        fig.savefig(out_f[:-4] + '.jpg', dpi=300)
+        plt.show()
+        # fig.savefig(out_f[:-4] + '.jpg', dpi=300)
 
 
 def main():
@@ -387,7 +387,7 @@ def main():
     parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=float, nargs='?')
     parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
-    parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?', default='pcloud.csv')
+    parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?')
     parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_true')
     args = parser.parse_args()
 
@@ -413,7 +413,7 @@ def main():
     ela = float(config['param']['ela'])
     dhdt = float(config['param']['dhdt'])
     plot = config['param'].getboolean('plot')
-
+    
     if args.gamma is not None:
         gamma = args.gamma
     if args.mb is not None:
@@ -424,9 +424,10 @@ def main():
         dhdt = args.dhdt
     if args.out_name is not None:
         out_name = args.out_name
-        # make sure out_name endswith csv
-        if not out_name.endswith('.csv'):
-            out_name = out_name.split('.')[0] + '.csv'
+        if (out_name != 'None') and (not out_name.endswith('.csv')):
+                out_name = out_name.split('.')[0] + '.csv'
+    if out_name == 'None':
+        out_name = None
     if args.plot:
         plot = args.plot    
 
@@ -474,6 +475,7 @@ def main():
     # sample vx, vy, and elev - we'll take average raster value in between flowline vertices
     vx = sample_2d_raster(verts_x, verts_y, vx_ds, mean=True)           # take the mean x-component velocity between each set of transverse vertices
     vy = sample_2d_raster(verts_x, verts_y, vy_ds, mean=True)           # take the mean y-component velocity between each set of transverse vertices
+    elev_mp = sample_2d_raster(mx, my, dem_ds)                          # take the elevtion at modpoint between each set of transverse vertices
     elev = sample_2d_raster(cx, cy, dem_ds)                             # take dem elevation value at cell's center
 
     # verts_x[-90:,-1] = np.nan
@@ -493,15 +495,20 @@ def main():
     if plot:
         plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, mb, ela, smb, dhdt, start_pos, h, out_name)
 
-    # export output xyz points
-    mx = np.ravel(mx, order='F')
-    my = np.ravel(my, order='F')
-    h = np.ravel(h, order='F')
+    if out_name:
+        print(out_name)
+        # export output xyz points
+        mx = np.ravel(mx, order='F')
+        my = np.ravel(my, order='F')
+        h = np.ravel(h, order='F')
+        elev_mp = np.ravel(elev_mp, order='F')
+        # subtrace thickness from surface elevation to get bed elevation
+        z = elev_mp - h                                
 
-    out = np.column_stack((mx,my,h))
-    out_df = pd.DataFrame(data=out, columns=['x','y','h'])
-    out_df.to_csv(out_name)
-    print('point cloud exported to:\t' + str(out_name))
+        out = np.column_stack((mx,my,h,z))
+        out_df = pd.DataFrame(data=out, columns=['x','y','h','z'])
+        out_df.to_csv(out_name)
+        print('point cloud exported to:\t' + str(out_name))
 
 # execute if run as a script
 if __name__ == '__main__':
