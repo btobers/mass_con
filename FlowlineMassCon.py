@@ -172,7 +172,7 @@ def get_smb(elev, mb, ela):
     return smb      # m of ice
 
 
-def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma):
+def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, direction):
     '''
     we determine the ice thickness along flowlines by conservation of mass
     following McNabb et al., 2012, we can express the upstream ice thickness as \frac{q_{out} + \int_S (\dot{b}_{sfc} + \frac{\partial h}{\partial t})dS }{\gamma W_{R} v_{sfc}},
@@ -208,26 +208,28 @@ def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma):
 
         # iterate over all cells and get thickness - we'll use two for loops, one for going upstream and one for going downstream.
         # upstream
-        for _n in range(start_pos[_i] - 1, -1, -1):
-            q[_n+1, _i] = h[_n+1, _i] * q_ovr_h[_n+1, _i]
-            h[_n, _i] = (q[_n+1, _i] - (smb[_n, _i] - dhdt)*(area[_n, _i])) / q_ovr_h[_n, _i]
+        if direction != "down":
+            for _n in range(start_pos[_i] - 1, -1, -1):
+                q[_n+1, _i] = h[_n+1, _i] * q_ovr_h[_n+1, _i]
+                h[_n, _i] = (q[_n+1, _i] - (smb[_n, _i] - dhdt)*(area[_n, _i])) / q_ovr_h[_n, _i]
 
-            # constrain positive thickness
-            if h[_n, _i] < 0:
-                h[_n, _i] = np.nan
-                break
+                # constrain positive thickness
+                if h[_n, _i] < 0:
+                    h[_n, _i] = np.nan
+                    break
 
         # downstream
-        for _n in range(start_pos[_i], h.shape[0] - 1):
-            # get ice flux at upstream cell boundary - gamma*l_n*h_n*v_n
-            q[_n,_i] = h[_n, _i] * q_ovr_h[_n, _i]
-            # solve for thickness at downstream cell boundary
-            h[_n+1, _i] = (q[_n,_i] + (smb[_n, _i] - dhdt)*(area[_n, _i])) / q_ovr_h[_n+1, _i]
+        if direction != "up":
+            for _n in range(start_pos[_i], h.shape[0] - 1):
+                # get ice flux at upstream cell boundary - gamma*l_n*h_n*v_n
+                q[_n,_i] = h[_n, _i] * q_ovr_h[_n, _i]
+                # solve for thickness at downstream cell boundary
+                h[_n+1, _i] = (q[_n,_i] + (smb[_n, _i] - dhdt)*(area[_n, _i])) / q_ovr_h[_n+1, _i]
 
-            # constrain positive thickness
-            if h[_n+1, _i] < 0:
-                h[_n+1, _i] = np.nan
-                break
+                # constrain positive thickness
+                if h[_n+1, _i] < 0:
+                    h[_n+1, _i] = np.nan
+                    break
 
     print(f'Total input ice flux: {np.sum(flux_in)*1e-9} km^3/year')
 
@@ -389,6 +391,7 @@ def main():
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
     parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?')
     parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_true')
+    parser.add_argument('-direction', dest = 'direction', help='direction to apply mass conservation [up, down, updown], default = down', type=str, default='down', nargs='?')
     args = parser.parse_args()
 
     # parse config file
@@ -430,6 +433,7 @@ def main():
         out_name = None
     if args.plot:
         plot = args.plot    
+    direction = args.direction
 
     print(f'Mass Balance Gradient:\t\t{mb} mm w.e./m/y\nEquilibrium Line Altutde:\t{ela} m\nSurface Elevation Change Rate:\t{dhdt} m/y\nGamma:\t\t\t\t{gamma}')
 
@@ -458,7 +462,6 @@ def main():
     # read in thickness measurements - this is currently set up to read a geopackage, but could easily by swapped for a csv file using:
     # rdata = pd.read_csv('file.csv'), so long as the csv has x, y, h columns
     rdata = gpd.read_file(dat_path + rdata)
-    rdata = rdata.rename(columns ={'srf_bottom_thick':'h'})         # replace 'srf_bottom_thick' with whatever column header pertains to your thickness field name. if it is already 'h', comment out this line
     rdata = rdata[~rdata.h.isna()]
     # projet radar data to same coordinate sys as velocity data - change epsg to appropriate numerical id in following line
     rdata = rdata.to_crs(epsg=3413)
@@ -487,7 +490,7 @@ def main():
     smb = get_smb(elev, mb, ela)
 
     # conserve max and get along-flowline thicknesses
-    h = conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma)
+    h = conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, direction)
 
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h[h > 940] = np.nan
