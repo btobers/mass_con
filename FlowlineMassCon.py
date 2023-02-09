@@ -240,7 +240,7 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         fig = plt.figure(figsize=(4.5,7))
         pad = '1%'
         size = '2%'
-        s=5
+        s=2
         gs = fig.add_gridspec(nrows=4, ncols=1, left=0.125, right=0.850, wspace=0, hspace=0.1)
 
         # # subplot 1 - surface elevation at cell centers
@@ -262,7 +262,7 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         # convert smb from m ice to m water
         smb = smb / 1000 * 917      # m water to m ice
         v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
-        ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
+        # ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
         c = ax1.scatter(cx, cy, c=smb, vmin=-3, vmax=3, cmap='RdBu', s=s)
         divider = make_axes_locatable(ax1)
         cax = divider.append_axes("right", size=size, pad=pad)
@@ -307,7 +307,7 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
 
         # subplot 2 - flowline thicknesses
         ax2 = fig.add_subplot(gs[2,0])
-        ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
+        # ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
         c = ax2.scatter(mx, my, c=h, cmap='YlGnBu', vmin=200, vmax=1000, s=s)
         c = ax2.scatter(rdata.x, rdata.y, c=rdata.h, cmap='YlGnBu', s=s, vmin=0, vmax=1000, zorder=100)
         divider = make_axes_locatable(ax2)
@@ -375,7 +375,9 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         fig.tight_layout()
         plt.subplots_adjust(wspace=0, hspace=0)
         plt.show()
-        # fig.savefig(out_f[:-4] + '.jpg', dpi=300)
+        if out_f:
+            print(out_f[:-4] + '.jpg')
+            fig.savefig(out_f[:-4] + '.jpg', dpi=300)
 
 
 def main():
