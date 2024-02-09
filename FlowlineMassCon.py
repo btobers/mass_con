@@ -4,14 +4,16 @@ import rasterio as rio
 from rasterio.mask import mask
 import geopandas as gpd
 from shapely import geometry
-import sys, os, argparse, configparser
+from scipy.interpolate import griddata
+import sys, os, argparse, configparser, json
 import matplotlib.path as path
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import matplotlib.ticker as tkr
+import cmocean
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-plt.rcParams["font.family"] = "Calibri"
+plt.rcParams["font.family"] = "Arial"
 plt.rcParams['font.size'] = 10
 plt.rcParams['legend.fontsize'] = 8
 
@@ -20,20 +22,21 @@ FlowlineMassConModel.py
 
 author: Brandon S. Tober
 date: 01SEPT2022
-updated: 22DEC2022
+updated: 09FEB2024
 
-Mass conservation approach to deriving glacier thickness along flowlines
+Mass conservation approach to deriving glacier thickness along flowlines following methods of McNabb et al., 2012
 
 inputs:
 verts_x: csv file containing x-coordinates along each flowline
 verts_y: csv file containing y-coordinates along each flowline
-vx_ds: x-component surface velocity geotiff file (same projection as cx & cy)
-vy_ds: y-component surface velocity geotiff file (same projection as cx & cy)
-dem_ds: digital elevation model geotiff file (same projection as cx & cy)
+vx_ds: x-component surface velocity geotiff file (same projection as verts_x & verts_y)
+vy_ds: y-component surface velocity geotiff file (same projection as verts_x & verts_y)
+dem_ds: digital elevation model geotiff file (same projection as verts_x & verts_y)
 rdata: geopackage/csv with thickness measurements
 mb: mass balance gradient (mm w.e./m)
 ela: equilibrium line altitude (m)
 dhdt: surface elevation change rate (m/yr)
+gamma: factor relating observed surface velocity to depth-averaged glacier velocity
 
 outputs:
 pcloud: file of size (#Steps x #Flowlines - 1, 3) containing x-coordinates, y-coordinates, thicknesses
@@ -54,6 +57,40 @@ def check_rasters(r1, r2):
     return
 
 
+# grid xyz data and export geotif
+def grid(x, y, z, res=100, epsg=3413, outpath=None):
+    # create meshgrid for output points
+    minx = np.nanmin(x)
+    maxx = np.nanmax(x)
+    miny = np.nanmin(y)
+    maxy = np.nanmax(y)
+    x_out = np.arange(minx,maxx,100)
+    y_out = np.arange(maxy,miny,-100)
+    X_out,Y_out = np.meshgrid(x_out,y_out)
+    # grid thickness and std
+    z_out = griddata(points=np.column_stack((x,y)), values=z, xi=(X_out,Y_out), method='linear')
+    driver = "GTiff"
+    dim = z_out.shape
+    count = 1
+    height = dim[0]
+    width = dim[1]
+    crs = rio.crs.CRS.from_epsg(epsg)  # Use the correct EPSG code
+    dtype = z_out.dtype
+    transform = rio.transform.from_origin(minx, maxy, res, res)
+    if not outpath.endswith('.tif'):
+        outpath += '.tif'
+    with rio.open(outpath, 'w',
+                    driver=driver,
+                    height=height,
+                    width=width,
+                    count=count,
+                    dtype=dtype,
+                    crs=crs,
+                    transform=transform) as dst:
+        dst.write_band(1, z_out)
+    return
+
+
 # sample raster at all x,y locations using two 2d x,y input arrays
 def sample_2d_raster(x, y, r_ds, mean=False):
     # if mean - we will get mean of pixels in between transverse vertices
@@ -61,16 +98,22 @@ def sample_2d_raster(x, y, r_ds, mean=False):
         vals = np.full((x.shape[0],x.shape[1]-1), np.nan)
         for _i in range(vals.shape[1]):
             for _n in range(vals.shape[0]):
-                pts = getEquidistantPoints((x[_n,_i], y[_n,_i]), (x[_n,_i+1], y[_n,_i+1]), 10)
-                smpls = np.asarray([x[0] for x in r_ds.sample(pts)])
-                smpls[smpls == r_ds.nodata] = np.nan
-                vals[_n,_i] = np.nanmean(smpls)
+                if np.isnan(np.array((x[_n,_i], y[_n,_i], x[_n,_i+1], y[_n,_i+1]))).any():
+                    continue
+                else:
+                    pts = getEquidistantPoints((x[_n,_i], y[_n,_i]), (x[_n,_i+1], y[_n,_i+1]), 10)
+                    smpls = np.asarray([x[0] for x in r_ds.sample(pts)])
+                    smpls[smpls == r_ds.nodata] = np.nan
+                    vals[_n,_i] = np.nanmean(smpls)
     
     else:
         vals = np.full(x.shape, np.nan)
         # sample raster
         for _i in range(vals.shape[1]):
-            vals[:,_i] = np.asarray([x[0] for x in r_ds.sample(np.column_stack((x[:,_i], y[:,_i])))])
+            # get non nan idx
+            idx = np.isnan(x[:,_i])
+            idx += np.isnan(y[:,_i])
+            vals[~idx,_i] = np.asarray([x[0] for x in r_ds.sample(np.column_stack((x[~idx,_i], y[~idx,_i])))])
 
     return vals
 
@@ -159,6 +202,48 @@ def get_input_thickness(verts_x, verts_y, mx, my, thick_gdf):
     return h_avg, start_pos
 
 
+# create dictionary to compare modeled and observed thickness for all cells
+# from each set of neighboring flowlines, create a polygon and see which thickness measurements fall within, then get average
+def thickness_comp_stats(verts_x, verts_y, mx, my, thick_gdf):
+    print('THIS FUNCTION IS UNDER CONSTRUCTION!')
+    return
+    # get thickness gdf x,y coords stacked together
+    thick_coords = thick_gdf[['x','y']].to_numpy()
+    r, c = mx.shape
+    # instantiate dictionary to hold modeled and observed thicknesses
+    h_comp_dict = {}
+    # instantiate average input coordinate for each flowline pair
+    coords_avg = np.full((c, 2), np.nan)
+    # instantiate start_pos array, which will hold the index of the closest midpoint to the average thickness measurement for each flowband - this will be used to determine up v downstream in conserve_mass()
+    start_pos = np.zeros(c, dtype=int)
+
+    # loop through consecutive flowline vertices and make polygon, get average thickness obs and assign value to closest flowline vertice midpoint
+    for _i in range(c):
+        # take first set of along flowline verts, then concatenate flipped second set to make a closed polygon from
+        tmpx = np.concatenate((verts_x[:,_i], np.flipud(verts_x[:,_i+1])))
+        tmpy = np.concatenate((verts_y[:,_i], np.flipud(verts_y[:,_i+1])))
+        # horizontally stack x and y coords
+        coords = np.column_stack((tmpx, tmpy))
+        poly = path.Path(coords)
+        # get thickness points that fill within this poly
+        idxs = poly.contains_points(thick_coords)
+
+        # if at least one thickness obs within flowband, get average and store closest midpoint index
+        if np.sum(idxs) > 0:
+            # get averaged thickness
+            h_avg[_i] = np.nanmean(thick_gdf['h'].iloc[idxs])
+            # store average coord
+            coords_avg[_i, 0] = np.nanmean(thick_gdf['x'].iloc[idxs])
+            coords_avg[_i, 1] = np.nanmean(thick_gdf['y'].iloc[idxs])
+
+            # calculate distance from average thickness measurement coord to all midpoints along flowband
+            dist = ((mx[:,_i] - coords_avg[_i,0])**2 + (my[:,_i] - coords_avg[_i,1])**2)**0.5
+            # save index of closest midpoint as start_pos for flowband
+            start_pos[_i] = np.argmin(dist)
+
+    return h_comp_dict
+
+
 # function to get the surface mass balance at a given elevation given a mass balance gradient (mm/m/yr) and an equilibrium line altitue (ELA; (m))
 def get_smb(elev, mb, ela):
     # mass balance at a given grid cell will be the difference in elevation from the ela multiplies by the gradient
@@ -236,12 +321,35 @@ def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, dire
     return h
 
 
-def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, mb, ela, smb, dhdt, start_pos, h, out_f):
-        fig = plt.figure(figsize=(4.5,7))
+def get_extent(x,y,buffer):
+    # get axis limit extents based on input data coords
+    xlims = [min(x)-buffer, max(x)+buffer]
+    ylims = [min(y)-buffer, max(y)+buffer]
+    return xlims, ylims
+
+
+### functions ###
+def discrete_cmap(N, base_cmap=None):
+    """Create an N-bin discrete colormap from the specified input map"""
+
+    # Note that if base_cmap is a string or None, you can simply do
+    #    return plt.cm.get_cmap(base_cmap, N)
+    # The following works for string, None, or a colormap instance:
+
+    base = base_cmap
+    color_list = base(np.linspace(0, 1, N))
+    cmap_name = base.name + str(N)
+    return base.from_list(cmap_name, color_list, N)
+
+
+def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, v_ds, mb, ela, smb, dhdt, start_pos, h, outline, out_f):
+        fig = plt.figure(figsize=(4.25,4))
         pad = '1%'
-        size = '2%'
+        size = '3%'
         s=2
-        gs = fig.add_gridspec(nrows=4, ncols=1, left=0.125, right=0.850, wspace=0, hspace=0.1)
+        ls = colors.LightSource(azdeg=315, altdeg=15)
+
+        gs = fig.add_gridspec(nrows=3, ncols=1, left=0.125, right=0.850, wspace=0, hspace=0.1)
 
         # # subplot 1 - surface elevation at cell centers
         # ax1 = fig.add_subplot(gs[1,0])
@@ -256,17 +364,40 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         # ax1.set_aspect('equal')
         # ax1.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
+        # auto equal extent
+
+        if outline is not None:
+            xs,ys = outline.geometry.exterior.coords.xy
+            
+        xlims, ylims = get_extent(np.ravel(verts_x), np.ravel(verts_y), 2e3)
+        left,bottom,right,top = xlims[0], ylims[0], xlims[1], ylims[1]
+            # create hillshade
+        z_tmp = dem_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, dem_ds.transform))
+        Z_hillshade = ls.hillshade(z_tmp,vert_exag=1000, dx=np.diff(xlims)[0] ,dy=np.diff(ylims)[0])
+        v = v_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, v_ds.transform))
+        v[v==v_ds.nodata] = np.nan
         # subplot 1 - surface mass balance
         ax1 = fig.add_subplot(gs[1,0])
+        ax1.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+
         # convert smb back to mm w.e.
         # convert smb from m ice to m water
         smb = smb / 1000 * 917      # m water to m ice
-        v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
+        # v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
         # ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
-        c = ax1.scatter(cx, cy, c=smb, vmin=-3, vmax=3, cmap='RdBu', s=s)
+        ax1.plot(xs,ys,'k')
+        vmin = np.floor(np.nanmin(smb))
+        vmax = np.ceil(np.nanmax(smb))
+        cmap = cmocean.cm.balance_r
+        N = int((vmax-vmin)/1)
+        cmap = cmocean.tools.crop(cmap, vmin, vmax, 0)
+        cmap=discrete_cmap(N, cmap)
+
+        c = ax1.scatter(cx, cy, c=smb, vmin=vmin, vmax=vmax, cmap=cmap, s=s)
+
         divider = make_axes_locatable(ax1)
         cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, orientation='vertical', label='Modeled annual\nmass balance (m w.e.)')
+        fig.colorbar(c, cax=cax, orientation='vertical', label='')#r'$\rmm_{a}\ ({\rmm\ \rmw.e.})$')
         ax1.set_ylabel('Northing (km)')
         ax1.set_xticklabels([])
         ax1.xaxis.set_ticks_position('both')
@@ -276,8 +407,22 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
 
         # subplot 0 - velocity vectors
         ax0 = fig.add_subplot(gs[0,0])
-        left, right = ax1.get_xlim()
-        bottom, top = ax1.get_ylim()
+        ax0.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray,zorder=9)
+
+        cmap = cmocean.cm.thermal
+        vmin=0
+        vmax=400
+        N = int((vmax-vmin)/50)
+        cmap=discrete_cmap(N, cmap)
+
+        c = ax0.imshow(v,extent=(left, right, bottom, top),cmap=cmap,vmin=vmin,vmax=vmax,zorder=10)
+        divider = make_axes_locatable(ax0)
+        cax = divider.append_axes("right", size=size, pad=pad)
+        fig.colorbar(c, cax=cax, ticks=[0,100,200,300,400], orientation='vertical', label='')#r'$\rmU\ (\frac{{\rmm}}{{\rmyr}})$')
+
+        ax0.plot(xs,ys,'k',zorder=10)
+        # left, right = ax1.get_xlim()
+        # bottom, top = ax1.get_ylim()
         xx = np.arange(left, right, step=500)
         yy = np.arange(bottom, top, step=500)
         XX,YY = np.meshgrid(xx,yy)
@@ -285,11 +430,12 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         grid_coords = [(x,y) for x, y in np.column_stack((np.ravel(XX),np.ravel(YY)))]
         vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
         vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
-        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy)
+        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy,zorder=11)
+
         r = patches.Rectangle((0,0), 1, 1, fill=False, edgecolor='none',
                                  visible=False)
-        ax0.legend([r], ['          '], framealpha=0.5, loc='upper left').set_zorder(1)
-        qk = ax0.quiverkey(q,  X=.07, Y=.8625, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes', zorder=1e5)
+        # ax0.legend([r], ['          '], framealpha=0.8, loc='lower left').set_zorder(20)
+        # qk = ax0.quiverkey(q,  X=.07, Y=.055, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes', zorder=30)
         ax0.set_xlim(left,right)
         ax0.set_ylim(bottom,top)
         divider = make_axes_locatable(ax0)
@@ -303,16 +449,35 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         ax0.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
         ax0.xaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
+        textstr = "                      "
+        props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
 
+        # plt.rcParams.update({'font.size': 8})
+        # place a text box in upper left in axes coords
+        ax0.text(0.03, 0.05, textstr, transform=ax0.transAxes,
+                        horizontalalignment='left',verticalalignment='bottom',bbox=props, zorder=11)
+
+        ax0.quiverkey(q,  X=0.07, Y=.11, U=100,
+                    label='100 m/yr', labelpos='E', coordinates = 'axes', zorder=11, labelsep=.05)
 
         # subplot 2 - flowline thicknesses
         ax2 = fig.add_subplot(gs[2,0])
-        # ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
-        c = ax2.scatter(mx, my, c=h, cmap='YlGnBu', vmin=200, vmax=1000, s=s)
-        c = ax2.scatter(rdata.x, rdata.y, c=rdata.h, cmap='YlGnBu', s=s, vmin=0, vmax=1000, zorder=100)
+        ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+        ax2.plot(xs,ys,'k')
+        ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
+        c = ax2.scatter(mx, my, c=h, cmap=cmocean.cm.ice_r, vmin=200, vmax=1000, s=s)
+
+        cmap = cmocean.cm.ice_r
+        vmin=0
+        vmax=int(np.ceil(np.nanmax(rdata.h) / 100.0)) * 100
+        N = int((vmax-vmin)/100)
+        cmap=discrete_cmap(N, cmap)
+
+        c = ax2.scatter(rdata.x, rdata.y, c=rdata.h, cmap=cmap, vmin=vmin, vmax=vmax, s=s, zorder=100)
         divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, orientation='vertical', label='Ice thickness (m)')
+        fig.colorbar(c, cax=cax, orientation='vertical', ticks=[0,250,500,750], label='')#r'$\rmh\ (\rmm)$')
+        
         # ax3.set_xlabel('Easting (m)')
         ax2.set_xticklabels([])
         ax2.set_ylabel('Northing (km)')
@@ -320,9 +485,27 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
         ax2.xaxis.set_ticks_position('both')
         ax2.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
 
+        for ax in [ax0,ax1,ax2]:
+            ax.set_xlim(xlims)
+            ax.set_ylim(ylims)
+        # ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
+        # fig.suptitle(
+        #     r'$\frac{{\partial \rmh}}{{\partial \rmt}} = {{{}}}\ \frac{{\rmm}}{{\rmyr}}$'.format(dhdt) + ', ' +
+        #     r'$\rmELA = {{{}}}\ \rmm$'.format(ela) + ', ' + 
+        #     r'$\nabla \dot{{\rmb}}_{{\rmsfc}} = {{{}}}\ \frac{{\rmmm\ \rmw.e.}}{{\rmm \cdot \rmyr}}$'.format(mb),
+        #     fontsize=10
+        #     )
+            
+        # fig.tight_layout()
+        # plt.subplots_adjust(wspace=0, hspace=0)
+        plt.subplots_adjust(hspace=0.125,left=0.1,right=0.9,top=0.825,bottom=0.05)
+        plt.show()
+        fig.savefig(out_f[:-4] + '.jpg', dpi=300)
+
+        fig3, ax3 = plt.subplots(1,1, figsize=(4.25,1.5))
+
         # subplot 4 - elevation cross section along flowline
         line = 1
-        ax3 = fig.add_subplot(gs[3,0])
         # create flowband distance array
         dist = np.zeros(mx.shape[0])
         dist[1:] = np.cumsum(np.sqrt(np.diff(mx[:,line]) ** 2.0 + np.diff(my[:,line]) ** 2.0))*1e-3
@@ -346,45 +529,35 @@ def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, v
             l4 = ax3.axvline(x=idx, color='tab:brown', ls='--', lw=1, zorder=1e5)
         else:
             l4 = ax3.axvline(x=i0 - 1000, color='tab:brown', ls='--', lw=1, zorder=1e5)
-      
+
+
+        # to get terminus distance, find intersection between midpoints for flowband and glacier outline
+        # s = gpd.GeoSeries(map(geometry.Point, zip(mx[:,line], mx[:,line])))
+        # s = geometry.LineString(s)
+        # o = gpd.GeoSeries(map(geometry.Point, zip(xs, ys)))
+        # o = geometry.LineString(o)
+        # # get intersection
+        # print(s.intersection(o))
+
         ax3.set_ylabel('Elevation (m)',labelpad=1.0)
         ax3.set_xlabel('Distance from seed points (km)')
-        ax3.legend(handles=[l3,l4,l1,l2], labels=['Known Thickness', 'Equilibrium Line', 'Glacier surface', 'Modeled bed'], framealpha=0.5, loc='lower right', ncol=2, columnspacing=1, handlelength=1).set_zorder(1e8)
-        ax3.set_xlim([dist.min()-1.25,dist.max()+1])
-        ax3.set_ylim([-500, round(elev.max(),-3)])
+        ax3.legend(handles=[l3,l4,l1,l2], labels=['Known Thickness', 'Equilibrium Line', 'Glacier surface', 'Modeled bed'], framealpha=0.5, loc='lower left', ncol=2,  borderaxespad=0.2, handletextpad=0.25, borderpad=0.2, columnspacing=1, handlelength=1).set_zorder(1e8)
+        ax3.set_xlim([np.nanmin(dist)-1.25,np.nanmax(dist)+1])
+        ax3.set_ylim([-500, round(np.nanmax(elev),-3)])
         ax3.invert_xaxis()
-        divider = make_axes_locatable(ax3)
+        divider = make_axes_locatable(ax2)
         cax = divider.append_axes("right", size=size, pad=pad)
         cax.axis('off')
-
-        # add hillshade to top four plots
-        ls = colors.LightSource(azdeg=315, altdeg=15)
-        z_tmp = dem_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, dem_ds.transform))
-        Z_hillshade = ls.hillshade(z_tmp,vert_exag=1000, dx=right - left,dy=top - bottom)
-        ax0.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        ax1.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        # ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        fig.suptitle(
-            r'$\frac{{\partial h}}{{\partial t}} = {{{}}}\ \frac{{m}}{{yr}}$'.format(dhdt) + ',\t\t' +
-            r'$ELA = {{{}}}\ m$'.format(ela) + ',\t\t' + 
-            r'$\nabla \dot{{b}}_{{sfc}} = {{{}}}\ \frac{{mm\ w.e.}}{{m \cdot yr}}$'.format(mb),
-            fontsize=10
-            )
-            
-        fig.tight_layout()
-        plt.subplots_adjust(wspace=0, hspace=0)
+        plt.subplots_adjust(hspace=0.125,left=0.25,right=0.755,top=0.9,bottom=.3)
         plt.show()
-        if out_f:
-            print(out_f[:-4] + '.jpg')
-            fig.savefig(out_f[:-4] + '.jpg', dpi=300)
+        fig3.savefig(out_f[:-4] + '2.jpg', dpi=300)
 
 
 def main():
     # Set up CLI
     parser = argparse.ArgumentParser(
     description='''Program conserving mass and calculating ice thickness along glacier flowlines\nNot all arguments are set up for command line input. Edif input files in the configuration file\n\n
-                    Example call: $python FlowlineMassCon.py config.ini -mb 10 -dhdt -0.50 -ela 1550 -gamma 0.90 -plot -out_name C:/Users/btober/OneDrive/Documents/MARS/targ/modl/mass_con/ruth/out/mb_10_ela_1550_dhdt_-0.50_gamma_0.90.csv''',
+                    Example call: /Users/btober/Drive/work/ruth/mass_con/data''',
     formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('conf', help='path to configuration file (.ini)', type=str)
     parser.add_argument('-mb', dest = 'mb', help='mass balance gradient (mm w.e./m/y)', type=float, nargs='?')
@@ -410,6 +583,7 @@ def main():
     verts_y = config['path']['verts_y']
     vx_ds = config['path']['vx']
     vy_ds = config['path']['vy']
+    v_ds = config['path']['v']
     dem_ds = config['path']['dem']
     rdata = config['path']['rdata']
     out_name = config['path']['out_name']
@@ -442,7 +616,7 @@ def main():
     # x and y vertex coordinates
     verts_x = pd.read_csv(dat_path + verts_x,header=None).to_numpy()
     verts_y = pd.read_csv(dat_path + verts_y,header=None).to_numpy()
-    
+
     # trim points outside gorge
     # verts_x = verts_x[:-185,:]
     # verts_y = verts_y[:-185,:]
@@ -454,6 +628,7 @@ def main():
     # x and y component surface velocities
     vx_ds = rio.open(dat_path + vx_ds, 'r')
     vy_ds = rio.open(dat_path + vy_ds, 'r')
+    v_ds = rio.open(dat_path + v_ds, 'r')
 
     # check for raster size mismatch
     check_rasters(vx_ds, vy_ds)
@@ -494,11 +669,23 @@ def main():
     # conserve max and get along-flowline thicknesses
     h = conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, direction)
 
+    # generate gridded output
+    grid(mx, my, h, res=100, epsg=3414, outpath = 'h_grid.tif')
+
+    # generate comparison dictionary with modeled v. observed thicknesses
+    h_comp_dict = thickness_comp_stats(verts_x, verts_y, mx, my, rdata)
+    with open('h_model_v_obs.json', 'w') as fp:
+        json.dump(h_comp_dict, fp)
+
+
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h[h > 940] = np.nan
 
     if plot:
-        plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, mb, ela, smb, dhdt, start_pos, h, out_name)
+        outline = gpd.read_file(dat_path + 'ruth_rgi6.shp')
+        outline = outline.to_crs(3413).iloc[0]
+
+        plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, v_ds, mb, ela, smb, dhdt, start_pos, h, outline, out_name)
 
     if out_name:
         print(out_name)

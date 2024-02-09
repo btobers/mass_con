@@ -108,6 +108,9 @@ plot(xs,ys,'.','MarkerSize',10)
 hold on
 plot(xcoords,ycoords,'.')
 streamline(verts)
+for i = 1:length(verts)
+    plot(verts{i}(end,1),verts{i}(end,2), 'r.')
+end
 %% get vertices for each flowline and export x and y vertex coordinate arrays
 % define how many vertices to export along each flowline
 % nverts              = 75;
@@ -120,17 +123,23 @@ nverts              = min(s);
 % nrows=# of vertices along each flowline
 for i = 1:length(verts)
     for j=1:nverts
-        if(isnan(verts{i}(j,1)))
-            continue
-        end
-        tmp((i*nverts)+j, 1) = verts{i}(j,1);
-        tmp((i*nverts)+j, 2) = verts{i}(j,2);
+        if j > size(verts{i},1)
+            xout(j,i) = nan;
+            yout(j,i) = nan;
+        else
+%         if(isnan(verts{i}(j,1)))
+%             continue
+%         end
+%         tmp((i*nverts)+j, 1) = verts{i}(j,1);
+%         tmp((i*nverts)+j, 2) = verts{i}(j,2);
+
         xout(j,i) = verts{i}(j,1);
         yout(j,i) = verts{i}(j,2);
+        end
     end
 end
 %% export each output array as csv
-out_dir = strcat(dat_path, num2str(N), '_seeds/');
+out_dir = strcat(dat_path, 'sensitivity/', num2str(N), '_seeds/');
 mkdir(out_dir);
-writematrix(xout,strcat(out_dir, num2str(N), '_seeds_verts_x.csv'));
-writematrix(yout,strcat(out_dir, num2str(N), '_seeds_verts_y.csv'));
+writematrix(xout,strcat(out_dir, num2str(N),'verts_x.csv'));
+writematrix(yout,strcat(out_dir, num2str(N),'verts_y.csv'));
