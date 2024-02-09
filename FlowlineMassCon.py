@@ -342,7 +342,6 @@ def main():
     verts_y = config['path']['verts_y']
     vx_ds = config['path']['vx']
     vy_ds = config['path']['vy']
-    v_ds = config['path']['v']
     dem_ds = config['path']['dem']
     rdata = config['path']['rdata']
     out_name = config['path']['out_name']
@@ -386,7 +385,6 @@ def main():
     # x and y component surface velocities
     vx_ds = rio.open(dat_path + vx_ds, 'r')
     vy_ds = rio.open(dat_path + vy_ds, 'r')
-    v_ds = rio.open(dat_path + v_ds, 'r')
 
     # check for raster size mismatch
     check_rasters(vx_ds, vy_ds)
