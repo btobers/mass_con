@@ -7,15 +7,7 @@ from shapely import geometry
 from scipy.interpolate import griddata
 import sys, os, argparse, configparser, json
 import matplotlib.path as path
-import matplotlib.patches as patches
-import matplotlib.pyplot as plt
-import matplotlib.colors as colors
-import matplotlib.ticker as tkr
-import cmocean
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-plt.rcParams["font.family"] = "Arial"
-plt.rcParams['font.size'] = 10
-plt.rcParams['legend.fontsize'] = 8
+
 
 '''
 FlowlineMassConModel.py
@@ -321,238 +313,6 @@ def conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, dire
     return h
 
 
-def get_extent(x,y,buffer):
-    # get axis limit extents based on input data coords
-    xlims = [min(x)-buffer, max(x)+buffer]
-    ylims = [min(y)-buffer, max(y)+buffer]
-    return xlims, ylims
-
-
-### functions ###
-def discrete_cmap(N, base_cmap=None):
-    """Create an N-bin discrete colormap from the specified input map"""
-
-    # Note that if base_cmap is a string or None, you can simply do
-    #    return plt.cm.get_cmap(base_cmap, N)
-    # The following works for string, None, or a colormap instance:
-
-    base = base_cmap
-    color_list = base(np.linspace(0, 1, N))
-    cmap_name = base.name + str(N)
-    return base.from_list(cmap_name, color_list, N)
-
-
-def plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, v_ds, mb, ela, smb, dhdt, start_pos, h, outline, out_f):
-        fig = plt.figure(figsize=(4.25,4))
-        pad = '1%'
-        size = '3%'
-        s=2
-        ls = colors.LightSource(azdeg=315, altdeg=15)
-
-        gs = fig.add_gridspec(nrows=3, ncols=1, left=0.125, right=0.850, wspace=0, hspace=0.1)
-
-        # # subplot 1 - surface elevation at cell centers
-        # ax1 = fig.add_subplot(gs[1,0])
-        # ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
-        # c = ax1.scatter(cx, cy, c=elev, cmap='gist_earth', s=s)
-        # divider = make_axes_locatable(ax1)
-        # cax = divider.append_axes("right", size=size, pad=pad)
-        # fig.colorbar(c, cax=cax, orientation='vertical', label='Elevation (m)')
-        # ax1.set_ylabel('Northing (km)')
-        # ax1.xaxis.set_ticks_position('both')
-        # ax1.set_xticklabels([])
-        # ax1.set_aspect('equal')
-        # ax1.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
-
-        # auto equal extent
-
-        if outline is not None:
-            xs,ys = outline.geometry.exterior.coords.xy
-            
-        xlims, ylims = get_extent(np.ravel(verts_x), np.ravel(verts_y), 2e3)
-        left,bottom,right,top = xlims[0], ylims[0], xlims[1], ylims[1]
-            # create hillshade
-        z_tmp = dem_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, dem_ds.transform))
-        Z_hillshade = ls.hillshade(z_tmp,vert_exag=1000, dx=np.diff(xlims)[0] ,dy=np.diff(ylims)[0])
-        v = v_ds.read(1, window=rio.windows.from_bounds(left, bottom, right, top, v_ds.transform))
-        v[v==v_ds.nodata] = np.nan
-        # subplot 1 - surface mass balance
-        ax1 = fig.add_subplot(gs[1,0])
-        ax1.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-
-        # convert smb back to mm w.e.
-        # convert smb from m ice to m water
-        smb = smb / 1000 * 917      # m water to m ice
-        # v = max(np.abs(np.nanmin(smb)), np.nanmax(smb))
-        # ax1.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
-        ax1.plot(xs,ys,'k')
-        vmin = np.floor(np.nanmin(smb))
-        vmax = np.ceil(np.nanmax(smb))
-        cmap = cmocean.cm.balance_r
-        N = int((vmax-vmin)/1)
-        cmap = cmocean.tools.crop(cmap, vmin, vmax, 0)
-        cmap=discrete_cmap(N, cmap)
-
-        c = ax1.scatter(cx, cy, c=smb, vmin=vmin, vmax=vmax, cmap=cmap, s=s)
-
-        divider = make_axes_locatable(ax1)
-        cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, orientation='vertical', label='')#r'$\rmm_{a}\ ({\rmm\ \rmw.e.})$')
-        ax1.set_ylabel('Northing (km)')
-        ax1.set_xticklabels([])
-        ax1.xaxis.set_ticks_position('both')
-        ax1.set_aspect('equal')
-        ax1.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
-
-
-        # subplot 0 - velocity vectors
-        ax0 = fig.add_subplot(gs[0,0])
-        ax0.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray,zorder=9)
-
-        cmap = cmocean.cm.thermal
-        vmin=0
-        vmax=400
-        N = int((vmax-vmin)/50)
-        cmap=discrete_cmap(N, cmap)
-
-        c = ax0.imshow(v,extent=(left, right, bottom, top),cmap=cmap,vmin=vmin,vmax=vmax,zorder=10)
-        divider = make_axes_locatable(ax0)
-        cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, ticks=[0,100,200,300,400], orientation='vertical', label='')#r'$\rmU\ (\frac{{\rmm}}{{\rmyr}})$')
-
-        ax0.plot(xs,ys,'k',zorder=10)
-        # left, right = ax1.get_xlim()
-        # bottom, top = ax1.get_ylim()
-        xx = np.arange(left, right, step=500)
-        yy = np.arange(bottom, top, step=500)
-        XX,YY = np.meshgrid(xx,yy)
-
-        grid_coords = [(x,y) for x, y in np.column_stack((np.ravel(XX),np.ravel(YY)))]
-        vx = np.asarray([x[0] for x in vx_ds.sample(grid_coords)])
-        vy = np.asarray([x[0] for x in vy_ds.sample(grid_coords)])
-        q = ax0.quiver(np.ravel(XX), np.ravel(YY), vx, vy,zorder=11)
-
-        r = patches.Rectangle((0,0), 1, 1, fill=False, edgecolor='none',
-                                 visible=False)
-        # ax0.legend([r], ['          '], framealpha=0.8, loc='lower left').set_zorder(20)
-        # qk = ax0.quiverkey(q,  X=.07, Y=.055, U=100, label=r'$100\ \frac{m}{yr}$', labelpos='E', labelsep=.05, fontproperties={'size':8}, coordinates = 'axes', zorder=30)
-        ax0.set_xlim(left,right)
-        ax0.set_ylim(bottom,top)
-        divider = make_axes_locatable(ax0)
-        cax = divider.append_axes("right", size=size, pad=pad)
-        cax.axis('off')
-        ax0.set_ylabel('Northing (km)')
-        ax0.set_xlabel('Easting (km)')   
-        ax0.xaxis.tick_top() 
-        ax0.xaxis.set_label_position('top') 
-        ax0.xaxis.set_ticks_position('both')
-        ax0.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
-        ax0.xaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
-
-        textstr = "                      "
-        props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
-
-        # plt.rcParams.update({'font.size': 8})
-        # place a text box in upper left in axes coords
-        ax0.text(0.03, 0.05, textstr, transform=ax0.transAxes,
-                        horizontalalignment='left',verticalalignment='bottom',bbox=props, zorder=11)
-
-        ax0.quiverkey(q,  X=0.07, Y=.11, U=100,
-                    label='100 m/yr', labelpos='E', coordinates = 'axes', zorder=11, labelsep=.05)
-
-        # subplot 2 - flowline thicknesses
-        ax2 = fig.add_subplot(gs[2,0])
-        ax2.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        ax2.plot(xs,ys,'k')
-        ax2.plot(verts_x[:,:],verts_y[:,:],'k',lw=.15)
-        c = ax2.scatter(mx, my, c=h, cmap=cmocean.cm.ice_r, vmin=200, vmax=1000, s=s)
-
-        cmap = cmocean.cm.ice_r
-        vmin=0
-        vmax=int(np.ceil(np.nanmax(rdata.h) / 100.0)) * 100
-        N = int((vmax-vmin)/100)
-        cmap=discrete_cmap(N, cmap)
-
-        c = ax2.scatter(rdata.x, rdata.y, c=rdata.h, cmap=cmap, vmin=vmin, vmax=vmax, s=s, zorder=100)
-        divider = make_axes_locatable(ax2)
-        cax = divider.append_axes("right", size=size, pad=pad)
-        fig.colorbar(c, cax=cax, orientation='vertical', ticks=[0,250,500,750], label='')#r'$\rmh\ (\rmm)$')
-        
-        # ax3.set_xlabel('Easting (m)')
-        ax2.set_xticklabels([])
-        ax2.set_ylabel('Northing (km)')
-        ax2.set_aspect('equal')
-        ax2.xaxis.set_ticks_position('both')
-        ax2.yaxis.set_major_formatter(tkr.FuncFormatter(lambda x, pos: f'{int(x * 1e-3)}'))
-
-        for ax in [ax0,ax1,ax2]:
-            ax.set_xlim(xlims)
-            ax.set_ylim(ylims)
-        # ax3.imshow(Z_hillshade,extent=(left, right, bottom, top),cmap=plt.cm.gray)
-        # fig.suptitle(
-        #     r'$\frac{{\partial \rmh}}{{\partial \rmt}} = {{{}}}\ \frac{{\rmm}}{{\rmyr}}$'.format(dhdt) + ', ' +
-        #     r'$\rmELA = {{{}}}\ \rmm$'.format(ela) + ', ' + 
-        #     r'$\nabla \dot{{\rmb}}_{{\rmsfc}} = {{{}}}\ \frac{{\rmmm\ \rmw.e.}}{{\rmm \cdot \rmyr}}$'.format(mb),
-        #     fontsize=10
-        #     )
-            
-        # fig.tight_layout()
-        # plt.subplots_adjust(wspace=0, hspace=0)
-        plt.subplots_adjust(hspace=0.125,left=0.1,right=0.9,top=0.825,bottom=0.05)
-        plt.show()
-        fig.savefig(out_f[:-4] + '.jpg', dpi=300)
-
-        fig3, ax3 = plt.subplots(1,1, figsize=(4.25,1.5))
-
-        # subplot 4 - elevation cross section along flowline
-        line = 1
-        # create flowband distance array
-        dist = np.zeros(mx.shape[0])
-        dist[1:] = np.cumsum(np.sqrt(np.diff(mx[:,line]) ** 2.0 + np.diff(my[:,line]) ** 2.0))*1e-3
-        # get surface elevation at midpoints
-        elev = sample_2d_raster(mx, my, dem_ds)[:,line]                             # take dem elevation value at cell's center
-        bed = elev - h[:,line]
-
-        l1, = ax3.plot(dist, elev, c='k',zorder=1e7)
-        l2, = ax3.plot(dist, bed, c='tab:gray',zorder=1e7)
-        ax3.fill_between(dist, bed, elev, color='tab:blue', alpha=0.5,zorder=1e4)
-        ax3.fill_between(dist, bed, elev, color='white', alpha=0.5,zorder=1e4)
-
-        d0 = dist[start_pos[line]]
-        i0 = start_pos[line]
-        l3 = ax3.vlines(x=d0, color='tab:gray', ls='--', lw=1, zorder=-1000, ymin=bed[i0], ymax=elev[i0])
-        l3.set_zorder(1e6)
-    
-        if ela < elev.max() and ela > elev.min():
-            diff = np.abs(elev - ela)
-            idx = dist[diff.argmin()] 
-            l4 = ax3.axvline(x=idx, color='tab:brown', ls='--', lw=1, zorder=1e5)
-        else:
-            l4 = ax3.axvline(x=i0 - 1000, color='tab:brown', ls='--', lw=1, zorder=1e5)
-
-
-        # to get terminus distance, find intersection between midpoints for flowband and glacier outline
-        # s = gpd.GeoSeries(map(geometry.Point, zip(mx[:,line], mx[:,line])))
-        # s = geometry.LineString(s)
-        # o = gpd.GeoSeries(map(geometry.Point, zip(xs, ys)))
-        # o = geometry.LineString(o)
-        # # get intersection
-        # print(s.intersection(o))
-
-        ax3.set_ylabel('Elevation (m)',labelpad=1.0)
-        ax3.set_xlabel('Distance from seed points (km)')
-        ax3.legend(handles=[l3,l4,l1,l2], labels=['Known Thickness', 'Equilibrium Line', 'Glacier surface', 'Modeled bed'], framealpha=0.5, loc='lower left', ncol=2,  borderaxespad=0.2, handletextpad=0.25, borderpad=0.2, columnspacing=1, handlelength=1).set_zorder(1e8)
-        ax3.set_xlim([np.nanmin(dist)-1.25,np.nanmax(dist)+1])
-        ax3.set_ylim([-500, round(np.nanmax(elev),-3)])
-        ax3.invert_xaxis()
-        divider = make_axes_locatable(ax2)
-        cax = divider.append_axes("right", size=size, pad=pad)
-        cax.axis('off')
-        plt.subplots_adjust(hspace=0.125,left=0.25,right=0.755,top=0.9,bottom=.3)
-        plt.show()
-        fig3.savefig(out_f[:-4] + '2.jpg', dpi=300)
-
-
 def main():
     # Set up CLI
     parser = argparse.ArgumentParser(
@@ -565,7 +325,6 @@ def main():
     parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
     parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?')
-    parser.add_argument('-plot', help='Flag: Plot results', default=False, action='store_true')
     parser.add_argument('-direction', dest = 'direction', help='direction to apply mass conservation [up, down, updown], default = down', type=str, default='down', nargs='?')
     args = parser.parse_args()
 
@@ -591,7 +350,6 @@ def main():
     mb = float(config['param']['mb'])
     ela = float(config['param']['ela'])
     dhdt = float(config['param']['dhdt'])
-    plot = config['param'].getboolean('plot')
     
     if args.gamma is not None:
         gamma = args.gamma
@@ -677,15 +435,8 @@ def main():
     with open('h_model_v_obs.json', 'w') as fp:
         json.dump(h_comp_dict, fp)
 
-
     # trim unreasonable thicknesses - we'll set anything greater than 950 m thick to nan, as our deepest amp thickness meaurements are ~920 m
     # h[h > 940] = np.nan
-
-    if plot:
-        outline = gpd.read_file(dat_path + 'ruth_rgi6.shp')
-        outline = outline.to_crs(3413).iloc[0]
-
-        plot_results(rdata, verts_x, verts_y, mx, my, cx, cy, elev, dem_ds, vx_ds, vy_ds, v_ds, mb, ela, smb, dhdt, start_pos, h, outline, out_name)
 
     if out_name:
         print(out_name)
