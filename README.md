@@ -8,6 +8,7 @@ Glacier mass conservation tools
   - This method follows the following schematic:
 <p align="center">
   <img src="https://github.com/btobers/mass_con/blob/main/recs/flowline_masscon_schematic.jpg" height="300"><br>
+  Credit: Brandon S. Tober, after McNabb et al., 2012 (Figure 2)
 </p>
 
 - *flowline_wrapper.sh* Bash shell script for FlowlineMassCon.py over a range of input mass balance parameters 
