@@ -7,6 +7,7 @@ from shapely import geometry
 from scipy.interpolate import griddata
 import sys, os, argparse, configparser, json
 import matplotlib.path as path
+import matplotlib.pyplot as plt
 
 
 '''
@@ -51,37 +52,59 @@ def check_rasters(r1, r2):
 
 
 # grid xyz data and export geotif
-def grid(x, y, z, res=100, epsg=3413, outpath=None):
-    # create meshgrid for output points
-    minx = np.nanmin(x)
-    maxx = np.nanmax(x)
-    miny = np.nanmin(y)
-    maxy = np.nanmax(y)
-    x_out = np.arange(minx,maxx,100)
-    y_out = np.arange(maxy,miny,-100)
-    X_out,Y_out = np.meshgrid(x_out,y_out)
-    # grid thickness and std
-    z_out = griddata(points=np.column_stack((x,y)), values=z, xi=(X_out,Y_out), method='linear')
-    driver = "GTiff"
-    dim = z_out.shape
-    count = 1
-    height = dim[0]
-    width = dim[1]
-    crs = rio.crs.CRS.from_epsg(epsg)  # Use the correct EPSG code
-    dtype = z_out.dtype
-    transform = rio.transform.from_origin(minx, maxy, res, res)
-    if not outpath.endswith('.tif'):
-        outpath += '.tif'
-    with rio.open(outpath, 'w',
-                    driver=driver,
-                    height=height,
-                    width=width,
-                    count=count,
-                    dtype=dtype,
-                    crs=crs,
-                    transform=transform) as dst:
-        dst.write_band(1, z_out)
-    return
+def grid(x, y, z, res=100, epsg=None, outpath=None, debug=False):
+    x_rav = np.ravel(x)
+    y_rav = np.ravel(y)
+    z_rav = np.ravel(z)
+    if x.shape!=y.shape!=z.shape:
+        raise('grid error: input arrays are not of the same shape')
+    if epsg and outpath:
+        # create meshgrid for output points
+        minx = np.nanmin(x_rav)
+        maxx = np.nanmax(x_rav)
+        miny = np.nanmin(y_rav)
+        maxy = np.nanmax(y_rav)
+        x_out = np.arange(minx,maxx,100)
+        y_out = np.arange(maxy,miny,-100)
+        X_out,Y_out = np.meshgrid(x_out,y_out)
+        # grid thickness and std
+        z_out = griddata(points=np.column_stack((x_rav,y_rav)), values=z_rav, xi=(X_out,Y_out), method='linear')
+        # ravel output and set values outside outer flowbanks to nan
+        x_rav = np.ravel(X_out)
+        y_rav = np.ravel(Y_out)
+        z_rav = np.ravel(z_out)
+        # create mask from flowband column 0,-1
+        xy_mask = np.column_stack((np.append(x[:,0],x[:,-1][::-1]), np.append(y[:,0],y[:,-1][::-1])))
+        xy_mask = np.vstack((xy_mask,np.column_stack((x[0,0],y[0,0]))))
+        mask = path.Path(xy_mask)
+        # get xy points inside mask
+        insidepts = mask.contains_points(np.column_stack((x_rav, y_rav)))
+        # set points outside to nan
+        z_rav[~insidepts] = np.nan
+        # reshape to 2d
+        z_out = z_rav.reshape(z_out.shape)
+        # export geotif
+        driver = "GTiff"
+        dim = z_out.shape
+        count = 1
+        height = dim[0]
+        width = dim[1]
+        crs = rio.crs.CRS.from_epsg(epsg)  # Use the correct EPSG code
+        dtype = z_out.dtype
+        transform = rio.transform.from_origin(minx, maxy, res, res)
+        if not outpath.endswith('.tif'):
+            outpath += '.tif'
+        with rio.open(outpath, 'w',
+                        driver=driver,
+                        height=height,
+                        width=width,
+                        count=count,
+                        dtype=dtype,
+                        crs=crs,
+                        transform=transform) as dst:
+            dst.write_band(1, z_out)
+        
+        return 
 
 
 # sample raster at all x,y locations using two 2d x,y input arrays
@@ -176,7 +199,7 @@ def get_input_thickness(verts_x, verts_y, mx, my, thick_gdf):
         # horizontally stack x and y coords
         coords = np.column_stack((tmpx, tmpy))
         poly = path.Path(coords)
-        # get thickness points that fill within this poly
+        # get thickness points that fall within this poly
         idxs = poly.contains_points(thick_coords)
 
         # if at least one thickness obs within flowband, get average and store closest midpoint index
@@ -197,43 +220,56 @@ def get_input_thickness(verts_x, verts_y, mx, my, thick_gdf):
 
 # create dictionary to compare modeled and observed thickness for all cells
 # from each set of neighboring flowlines, create a polygon and see which thickness measurements fall within, then get average
-def thickness_comp_stats(verts_x, verts_y, mx, my, thick_gdf):
-    return
-    # # get thickness gdf x,y coords stacked together
-    # thick_coords = thick_gdf[['x','y']].to_numpy()
-    # r, c = mx.shape
-    # # instantiate dictionary to hold modeled and observed thicknesses
-    # h_comp_dict = {}
-    # # instantiate average input coordinate for each flowline pair
-    # coords_avg = np.full((c, 2), np.nan)
-    # # instantiate start_pos array, which will hold the index of the closest midpoint to the average thickness measurement for each flowband - this will be used to determine up v downstream in conserve_mass()
-    # start_pos = np.zeros(c, dtype=int)
+def thickness_comp_stats(verts_x, verts_y, mx, my, hmod, thick_gdf):
+    # get thickness gdf x,y coords stacked together
+    thick_coords = thick_gdf[['x','y']].to_numpy()
+    r, c = verts_x.shape
+    # nested for loop - go
+    # instantiate dictionary to hold modeled and observed thicknesses
+    h_comp_dict = {}
+    h_comp_dict['rdr_xmean'] = []
+    h_comp_dict['rdr_ymean'] = []
+    h_comp_dict['rdr_hmean'] = []
+    h_comp_dict['rdr_hmedian'] = []
+    h_comp_dict['rdr_hstd'] = []
+    h_comp_dict['rdr_hiqr'] = []
+    h_comp_dict['rdr_npts'] = []
+    h_comp_dict['mod_h'] = []
+    h_comp_dict['mod_dist'] = []
 
-    # # loop through consecutive flowline vertices and make polygon, get average thickness obs and assign value to closest flowline vertice midpoint
-    # for _i in range(c):
-    #     # take first set of along flowline verts, then concatenate flipped second set to make a closed polygon from
-    #     tmpx = np.concatenate((verts_x[:,_i], np.flipud(verts_x[:,_i+1])))
-    #     tmpy = np.concatenate((verts_y[:,_i], np.flipud(verts_y[:,_i+1])))
-    #     # horizontally stack x and y coords
-    #     coords = np.column_stack((tmpx, tmpy))
-    #     poly = path.Path(coords)
-    #     # get thickness points that fill within this poly
-    #     idxs = poly.contains_points(thick_coords)
+    # go along flowline pairs
+    for _i in range(c - 1):
+        for _n in range(r - 1):
+            # make poly from 4 vertices
+            tmpx = [verts_x[_n,_i], verts_x[_n+1,_i],verts_x[_n+1,_i+1],verts_x[_n,_i+1],verts_x[_n,_i,]]
+            tmpy = [verts_y[_n,_i], verts_y[_n+1,_i],verts_y[_n+1,_i+1],verts_y[_n,_i+1],verts_y[_n,_i,]]
+            # stack x and y coords
+            coords = np.column_stack((tmpx, tmpy))
+            # create polygon
+            poly = path.Path(coords)
+            # get thickness points that fall within this poly
+            idxs = poly.contains_points(thick_coords)
+            # if at least one thickness obs within poly, add results to h_comp_dict
+            if np.sum(idxs) > 0:
+                # get averaged thickness
+                h_comp_dict['rdr_hmean'].append(np.nanmean(thick_gdf['h'].iloc[idxs]))
+                h_comp_dict['rdr_hmedian'].append(np.nanmedian(thick_gdf['h'].iloc[idxs]))
+                h_comp_dict['rdr_hstd'].append(np.nanstd(thick_gdf['h'].iloc[idxs]))
+                h_comp_dict['rdr_hiqr'].append(np.nanquantile(thick_gdf['h'].iloc[idxs],.75) - np.nanquantile(thick_gdf['h'].iloc[idxs],.25))
+                h_comp_dict['rdr_npts'].append(float(np.sum(idxs)))
+                # store average coord
+                rdr_xmean = np.nanmean(thick_gdf['x'].iloc[idxs])
+                rdr_ymean = np.nanmean(thick_gdf['y'].iloc[idxs])
+                h_comp_dict['rdr_xmean'].append(rdr_xmean)
+                h_comp_dict['rdr_ymean'].append(rdr_ymean)
 
-    #     # if at least one thickness obs within flowband, get average and store closest midpoint index
-    #     if np.sum(idxs) > 0:
-    #         # get averaged thickness
-    #         h_avg[_i] = np.nanmean(thick_gdf['h'].iloc[idxs])
-    #         # store average coord
-    #         coords_avg[_i, 0] = np.nanmean(thick_gdf['x'].iloc[idxs])
-    #         coords_avg[_i, 1] = np.nanmean(thick_gdf['y'].iloc[idxs])
+                # calculate distance from average thickness measurement coord to all midpoints along flowband
+                dist = ((mx[:,_i] - rdr_xmean)**2 + (my[:,_i] - rdr_ymean)**2)**0.5
+                # add results to h_comp_dict
+                h_comp_dict['mod_h'].append(hmod[np.argmin(dist),_i])
+                h_comp_dict['mod_dist'].append(dist[np.argmin(dist)])
 
-    #         # calculate distance from average thickness measurement coord to all midpoints along flowband
-    #         dist = ((mx[:,_i] - coords_avg[_i,0])**2 + (my[:,_i] - coords_avg[_i,1])**2)**0.5
-    #         # save index of closest midpoint as start_pos for flowband
-    #         start_pos[_i] = np.argmin(dist)
-
-    # return h_comp_dict
+    return h_comp_dict
 
 
 # function to get the surface mass balance at a given elevation given a mass balance gradient (mm/m/yr) and an equilibrium line altitue (ELA; (m))
@@ -324,8 +360,10 @@ def main():
     parser.add_argument('-ela', dest = 'ela', help='equilibrium line altitude (m)', type=float, nargs='?')
     parser.add_argument('-dhdt', dest = 'dhdt', help='surface elevation change rate (m/yr)', type=float, nargs='?')
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
-    parser.add_argument('-out_name', dest = 'out_name', help='output point cloud file name', type=str, nargs='?')
+    parser.add_argument('-out_name', dest = 'out_name', help='output file name with no extension (same name will be used for point cloud, stats dictionary, and gridded results but with different suffixes)', type=str, nargs='?')
     parser.add_argument('-direction', dest = 'direction', help='direction to apply mass conservation [up, down, updown], default = down', type=str, default='down', nargs='?')
+    parser.add_argument('-grid', dest = 'grid', help='grid model thickness?', action='store_true')
+    parser.add_argument('-debug', dest = 'debug', help='debug', action='store_true')
     args = parser.parse_args()
 
     # parse config file
@@ -345,11 +383,14 @@ def main():
     dem_ds = config['path']['dem']
     rdata_gate = config['path']['rdata_gate']
     rdata_all = config['path']['rdata_all']
+    if rdata_all == 'None':
+        rdata_all = None
     out_name = config['path']['out_name']
     gamma = float(config['param']['gamma'])
     mb = float(config['param']['mb'])
     ela = float(config['param']['ela'])
     dhdt = float(config['param']['dhdt'])
+    grid_ = config['param'].getboolean('grid')
     gridres = float(config['param']['gridres'])
     
     if args.gamma is not None:
@@ -366,7 +407,10 @@ def main():
                 out_name = out_name.split('.')[0] + '.csv'
     if out_name == 'None':
         out_name = None 
+    if args.grid:
+        grid_  = True
     direction = args.direction
+    debug = args.debug
 
     print(f'Mass Balance Gradient:\t\t{mb} mm w.e./m/y\nEquilibrium Line Altutde:\t{ela} m\nSurface Elevation Change Rate:\t{dhdt} m/y\nGamma:\t\t\t\t{gamma}')
 
@@ -401,16 +445,34 @@ def main():
     rdata = rdata.sort_values(['y'], ascending=True)
 
     # same thing, but read in all thickness obs to compare with modeled thicknesses - this is currently set up to read a geopackage, but could easily by swapped for a csv file using:
-    # rdata_all = pd.read_csv('file.csv'), so long as the csv has x, y, h columns
-    rdata_all = gpd.read_file(dat_path + rdata_all)
-    rdata_all = rdata[~rdata.h.isna()]
-    # projet radar data to same coordinate sys as velocity data
-    rdata_all = rdata_all.to_crs(epsg=epsg)
-    rdata_all['x'] = rdata_all.centroid.x
-    rdata_all['y'] = rdata_all.centroid.y
+    if rdata_all:
+        # rdata_all = pd.read_csv('file.csv'), so long as the csv has x, y, h columns
+        rdata_all = gpd.read_file(dat_path + rdata_all)
+        rdata_all = rdata[~rdata.h.isna()]
+        # projet radar data to same coordinate sys as velocity data
+        rdata_all = rdata_all.to_crs(epsg=epsg)
+        rdata_all['x'] = rdata_all.centroid.x
+        rdata_all['y'] = rdata_all.centroid.y
+    else:
+        rdata_all = rdata
 
     # get cell centroids and area, vertex pair midpoints, vertex pair dx and dy
     cx, cy, mx, my, dx, dy, area = build_mesh(verts_x, verts_y)
+    
+    if debug:
+        fig,ax = plt.subplots(1)
+        for c in range(verts_x.shape[1]):
+            ax.plot(verts_x[:,c],verts_y[:,c],'k-', marker='x', lw=1, ms=5,label=r'v$_{i,j}$')
+        for c in range(cx.shape[1]):
+            ax.plot(cx[:,c],cy[:,c],'r.', ms=5, label=r'c$_{i}$')
+        h, l = ax.get_legend_handles_labels()
+        h = [h[0],h[verts_x.shape[1]]]
+        l = [l[0],l[verts_x.shape[1]]]
+        ax.legend(h, l,borderaxespad=0,fancybox=False)
+        ax.set_xlabel('easting')
+        ax.set_ylabel('northing')
+        fig.tight_layout()
+        plt.show()
 
     # for each set of flowband, get average input thickness  and start position - closest midpoint within flowband to average thickness measurement
     h_avg, start_pos = get_input_thickness(verts_x, verts_y, mx, my, rdata)
@@ -427,28 +489,39 @@ def main():
     # conserve max and get along-flowline thicknesses
     h = conserve_mass(dx, dy, area, vx, vy, smb, dhdt, h_avg, start_pos, gamma, direction)
 
-    # generate gridded output
-    grid(mx, my, h, res=gridres, epsg=epsg, outpath = 'h_grid.tif')
-
     # generate comparison dictionary with modeled v. observed thicknesses
-    h_comp_dict = thickness_comp_stats(verts_x, verts_y, mx, my, rdata_all)
-    # with open('h_model_v_obs.json', 'w') as fp:
-    #     json.dump(h_comp_dict, fp)
+    h_comp_dict = thickness_comp_stats(verts_x, verts_y, mx, my, h, rdata_all)
 
     if out_name:
-        print(out_name)
         # export output xyz points
-        mx = np.ravel(mx, order='F')
-        my = np.ravel(my, order='F')
-        h = np.ravel(h, order='F')
+        mx_ = np.ravel(mx, order='F')
+        my_ = np.ravel(my, order='F')
+        h_ = np.ravel(h, order='F')
         elev_mp = np.ravel(elev_mp, order='F')
         # subtrace thickness from surface elevation to get bed elevation
-        z = elev_mp - h                                
+        z_ = elev_mp - h_                                
 
-        out = np.column_stack((mx,my,h,z))
+        out = np.column_stack((mx_,my_,h_,z_))
         out_df = pd.DataFrame(data=out, columns=['x','y','h','z'])
-        out_df.to_csv(out_name)
-        print('point cloud exported to:\t' + str(out_name))
+        out_df.to_csv(out_name + '.csv')
+        print('point cloud exported to:\t' + str(out_name + '.csv'))
+
+
+        with open(f'{out_name}_h_model_v_obs.json', 'w') as fp:
+            json.dump(h_comp_dict, fp)
+            print(f'model v. observed thickness stats exported to:\t{out_name}_h_model_v_obs.json')
+
+            # # example of reading model comparison dict
+            # with open(f'{out_name}_h_model_v_obs.json', 'r') as fp:
+            #     stats_dict = json.load(fp)
+            #     ks = list(stats_dict.keys())
+
+        
+        # generate gridded output
+        if grid_:
+            grid(mx, my, h, res=gridres, epsg=epsg, outpath = f'{out_name}_h_{epsg}_{gridres}m_grid.tif', debug=debug)
+            print(f'gridded model thickness exported to:\t{out_name}_h_{epsg}_{gridres}m_grid.tif')
+
 
 # execute if run as a script
 if __name__ == '__main__':
