@@ -64,8 +64,8 @@ def grid(x, y, z, res=100, epsg=None, outpath=None, debug=False):
         maxx = np.nanmax(x_rav)
         miny = np.nanmin(y_rav)
         maxy = np.nanmax(y_rav)
-        x_out = np.arange(minx,maxx,100)
-        y_out = np.arange(maxy,miny,-100)
+        x_out = np.arange(minx,maxx,res)
+        y_out = np.arange(maxy,miny,-1*res)
         X_out,Y_out = np.meshgrid(x_out,y_out)
         # grid thickness and std
         z_out = griddata(points=np.column_stack((x_rav,y_rav)), values=z_rav, xi=(X_out,Y_out), method='linear')
