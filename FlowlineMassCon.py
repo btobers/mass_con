@@ -53,13 +53,27 @@ def check_rasters(r1, r2):
 
 
 # grid xyz data and export geotif
-def grid(x, y, z, res=100, epsg=None, outpath=None, debug=False):
-    x_rav = np.ravel(x)
-    y_rav = np.ravel(y)
-    z_rav = np.ravel(z)
-    if x.shape!=y.shape!=z.shape:
-        raise('grid error: input arrays are not of the same shape')
+def grid(x, y, z, res=100, outline_csv=None, epsg=None, outpath=None, debug=False):
     if epsg and outpath:
+
+        # ravel coords
+        x_rav = np.ravel(x)
+        y_rav = np.ravel(y)
+        z_rav = np.ravel(z)
+        if x.shape!=y.shape!=z.shape:
+            raise('grid error: input arrays are not of the same shape')
+
+        if outline_csv and os.path.exists(outline_csv):
+            # if outline csv read in coordinates - this should be x,y coordinate pairs
+            outline_df = pd.read_csv(outline_csv)
+            outlinex = outline_df.iloc[:,0]
+            outliney = outline_df.iloc[:,1]
+            x = np.append(x,outlinex)
+            y = np.append(y,outliney)
+            z = np.append(z,np.zeros(len(outlinex)))
+        else:
+            outline_csv = None
+
         # create meshgrid for output points
         minx = np.nanmin(x_rav)
         maxx = np.nanmax(x_rav)
@@ -68,15 +82,19 @@ def grid(x, y, z, res=100, epsg=None, outpath=None, debug=False):
         x_out = np.arange(minx,maxx,res)
         y_out = np.arange(maxy,miny,-1*res)
         X_out,Y_out = np.meshgrid(x_out,y_out)
-        # grid thickness and std
+        # grid thickness
         z_out = griddata(points=np.column_stack((x_rav,y_rav)), values=z_rav, xi=(X_out,Y_out), method='linear')
         # ravel output and set values outside outer flowbanks to nan
         x_rav = np.ravel(X_out)
         y_rav = np.ravel(Y_out)
         z_rav = np.ravel(z_out)
-        # create mask from flowband column 0,-1
-        xy_mask = np.column_stack((np.append(x[:,0],x[:,-1][::-1]), np.append(y[:,0],y[:,-1][::-1])))
-        xy_mask = np.vstack((xy_mask,np.column_stack((x[0,0],y[0,0]))))
+        # mask out pixesl outside ROI - use csv outline if present, otherwise use outer flowbands
+        if outline_csv:
+            xy_mask = np.column_stack((outlinex,outliney))
+        else:
+            # create mask from flowband column 0,-1
+            xy_mask = np.column_stack((np.append(x[:,0],x[:,-1][::-1]), np.append(y[:,0],y[:,-1][::-1])))
+            xy_mask = np.vstack((xy_mask,np.column_stack((x[0,0],y[0,0]))))
         mask = path.Path(xy_mask)
         # get xy points inside mask
         insidepts = mask.contains_points(np.column_stack((x_rav, y_rav)))
@@ -381,6 +399,7 @@ def main():
     parser.add_argument('-gamma', dest = 'gamma', help='factor relating surface velocity to depth-averaged velocity', type=float, nargs='?')
     parser.add_argument('-out_name', dest = 'out_name', help='output file name with no extension (same name will be used for point cloud, stats dictionary, and gridded results but with different suffixes)', type=str, nargs='?')
     parser.add_argument('-direction', dest = 'direction', help='direction to apply mass conservation [up, down, updown], default = down', type=str, default='down', nargs='?')
+    parser.add_argument('-outlinemask', dest = 'outlinemask', help='mask to use in gridding as glacier outline (csv file)', type=str, nargs='?')
     parser.add_argument('-grid', dest = 'grid', help='grid model thickness?', action='store_true')
     parser.add_argument('-debug', dest = 'debug', help='debug', action='store_true')
     args = parser.parse_args()
@@ -411,6 +430,7 @@ def main():
     dhdt = float(config['param']['dhdt'])
     grid_ = config['param'].getboolean('grid')
     gridres = float(config['param']['gridres'])
+    outlinemask = config['path']['outline']
     
     if args.gamma is not None:
         gamma = args.gamma
@@ -420,12 +440,12 @@ def main():
         ela = args.ela
     if args.dhdt is not None:
         dhdt = args.dhdt
+    if args.outlinemask is not None:
+        outlinemask = args.outlinemask
     if args.out_name is not None:
         out_name = args.out_name
-        if (out_name != 'None') and (not out_name.endswith('.csv')):
-                out_name = out_name.split('.')[0] + '.csv'
-    if out_name == 'None':
-        out_name = None 
+        if out_name == 'None':
+            out_name = None
     if args.grid:
         grid_  = True
     direction = args.direction
@@ -538,7 +558,7 @@ def main():
         
         # generate gridded output
         if grid_:
-            grid(mx, my, h, res=gridres, epsg=epsg, outpath = f'{out_name}_h_{epsg}_{gridres}m_grid.tif', debug=debug)
+            grid(mx, my, h, res=gridres, epsg=epsg, outline_csv=outlinemask, outpath = f'{out_name}_h_{epsg}_{gridres}m_grid.tif', debug=debug)
             print(f'gridded model thickness exported to:\t{out_name}_h_{epsg}_{gridres}m_grid.tif')
 
 
