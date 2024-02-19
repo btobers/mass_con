@@ -8,6 +8,7 @@ from scipy.interpolate import griddata
 import sys, os, argparse, configparser, json
 import matplotlib.path as path
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 '''
@@ -83,6 +84,24 @@ def grid(x, y, z, res=100, epsg=None, outpath=None, debug=False):
         z_rav[~insidepts] = np.nan
         # reshape to 2d
         z_out = z_rav.reshape(z_out.shape)
+        if debug:
+            fig,ax = plt.subplots(1)
+            cm=ax.imshow(z_out,extent=[minx,maxx,miny,maxy])
+            ax.plot(xy_mask[:,0],xy_mask[:,1],'r', label = 'Outline mask')
+            for c in range(x.shape[1]):
+                ax.plot(x[:,c],y[:,c],'k', ls='none', marker='x', lw=1, ms=2,label=r'h$_{i,j}$')
+            h, l = ax.get_legend_handles_labels()
+            h = [h[0],h[x.shape[1]]]
+            l = [l[0],l[x.shape[1]]]
+            ax.legend(h, l,borderaxespad=0,fancybox=False)
+            ax.set_xlabel('easting')
+            ax.set_ylabel('northing')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size='2%', pad='3%')
+            cbar = fig.colorbar(cm, cax=cax, orientation='vertical')
+            cbar.set_label(label='Ice Thickness (m)', labelpad=5.5)
+            fig.tight_layout()
+            plt.show()  
         # export geotif
         driver = "GTiff"
         dim = z_out.shape
